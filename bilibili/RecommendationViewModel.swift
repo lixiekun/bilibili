@@ -32,6 +32,19 @@ class RecommendationViewModel: ObservableObject {
     }
 }
 
+extension RecommendationViewModel {
+    /// 用于 SwiftUI 预览的静态数据
+    static var preview: RecommendationViewModel {
+        let vm = RecommendationViewModel()
+        vm.videoItems = [
+            .mock(id: "BV1xx411c7mD", title: "史上最强 React Hooks 入门", author: "程序员小明", views: 1254000, duration: 754),
+            .mock(id: "BV1jj411k7Tp", title: "苹果 Vision Pro 初体验：空间计算的第一天", author: "数码评测社", views: 842331, duration: 612),
+            .mock(id: "BV1zz4y1A7QD", title: "如何在 30 天内自学 SwiftUI", author: "学习笔记本", views: 39214, duration: 445)
+        ]
+        return vm
+    }
+}
+
 private struct RecommendationResponse: Decodable {
     let data: DataContainer
 

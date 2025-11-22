@@ -11,7 +11,7 @@ import SwiftUI
 struct bilibiliApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(viewModel: RecommendationViewModel())
         }
         // 如果需要沉浸式空间，可以在这里添加
         // .immersiveSpace(id: "ImmersiveSpace") { 

@@ -26,6 +26,22 @@ struct VideoItem: Identifiable, Decodable, Hashable {
         case view
     }
 
+    init(
+        id: String,
+        title: String,
+        coverImageURL: URL,
+        authorName: String,
+        viewCount: Int,
+        duration: Int
+    ) {
+        self.id = id
+        self.title = title
+        self.coverImageURL = coverImageURL
+        self.authorName = authorName
+        self.viewCount = viewCount
+        self.duration = duration
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -40,5 +56,19 @@ struct VideoItem: Identifiable, Decodable, Hashable {
         viewCount = try statContainer.decodeIfPresent(Int.self, forKey: .view) ?? 0
 
         duration = try container.decodeIfPresent(Int.self, forKey: .duration) ?? 0
+    }
+}
+
+// MARK: - Preview helpers
+extension VideoItem {
+    static func mock(id: String, title: String, author: String, views: Int, duration: Int) -> VideoItem {
+        VideoItem(
+            id: id,
+            title: title,
+            coverImageURL: URL(string: "https://i0.hdslb.com/bfs/archive/placeholder.jpg")!,
+            authorName: author,
+            viewCount: views,
+            duration: duration
+        )
     }
 }
