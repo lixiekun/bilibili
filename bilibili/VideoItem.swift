@@ -1,27 +1,44 @@
 import Foundation
 
-struct VideoItem: Identifiable, Decodable {
-    let id: String // 假设 API 返回的视频有唯一 ID
+/// 精简后的视频数据模型，对应 Bilibili popular 接口的核心字段。
+struct VideoItem: Identifiable, Decodable, Hashable {
+    let id: String // bvid
     let title: String
-    let coverImageURL: String // 封面图片的 URL
+    let coverImageURL: URL
     let authorName: String
-    // 你可以根据实际 API 返回的数据添加更多字段，例如播放量、时长等
+    let viewCount: Int
+    let duration: Int // 单位：秒
 
-    // 为了方便演示，我们使用假数据。你需要根据实际 API 的字段名来调整 CodingKeys
-    // 如果 API 返回的字段名与你的结构体属性名完全一致，则不需要 CodingKeys
     enum CodingKeys: String, CodingKey {
-        case id = "bvid" // 假设 API 返回的视频 ID 字段是 "bvid"
+        case id = "bvid"
         case title
-        case coverImageURL = "pic" // 假设 API 返回的封面图字段是 "pic"
-        case authorName = "owner_name" // 假设 API 返回的作者名字段是 "owner_name"
+        case coverImageURL = "pic"
+        case owner
+        case stat
+        case duration
+    }
+
+    enum OwnerKeys: String, CodingKey {
+        case name
+    }
+
+    enum StatKeys: String, CodingKey {
+        case view
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        let coverURL = try container.decodeIfPresent(URL.self, forKey: .coverImageURL)
+        coverImageURL = coverURL ?? URL(string: "https://i0.hdslb.com/bfs/archive/placeholder.jpg")!
+
+        let ownerContainer = try container.nestedContainer(keyedBy: OwnerKeys.self, forKey: .owner)
+        authorName = try ownerContainer.decode(String.self, forKey: .name)
+
+        let statContainer = try container.nestedContainer(keyedBy: StatKeys.self, forKey: .stat)
+        viewCount = try statContainer.decodeIfPresent(Int.self, forKey: .view) ?? 0
+
+        duration = try container.decodeIfPresent(Int.self, forKey: .duration) ?? 0
     }
 }
-
-// 这是一个示例用的 API 响应结构，你需要根据实际的 API 文档来调整
-struct RecommendationResponse: Decodable {
-    let data: RecommendationData // 假设 API 外层有一个 "data" 字段
-}
-
-struct RecommendationData: Decodable {
-    let items: [VideoItem] // 假设 "data" 里面有一个 "items" 数组包含视频列表
-} 

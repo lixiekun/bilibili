@@ -6,75 +6,156 @@
 //
 
 import SwiftUI
-import RealityKit
-import RealityKitContent
 
 struct ContentView: View {
     @StateObject private var viewModel = RecommendationViewModel()
+    @State private var selection: VideoItem?
 
-    var body: some Scene {
-        WindowGroup {
-            NavigationView { // visionOS 中通常使用 NavigationView
-                VStack {
-                    if viewModel.isLoading {
-                        ProgressView("正在加载推荐...")
-                    } else if let errorMessage = viewModel.errorMessage {
+    var body: some View {
+        NavigationSplitView {
+            Group {
+                if viewModel.isLoading {
+                    ProgressView("正在加载推荐…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let errorMessage = viewModel.errorMessage {
+                    VStack(spacing: 12) {
                         Text("错误: \(errorMessage)")
                             .foregroundColor(.red)
                         Button("重试") {
                             viewModel.fetchRecommendations()
                         }
-                    } else {
-                        List(viewModel.videoItems) { item in
-                            VideoRow(videoItem: item)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if viewModel.videoItems.isEmpty {
+                    Text("暂无推荐内容")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(viewModel.videoItems, selection: $selection) { item in
+                        VideoRow(videoItem: item)
+                            .tag(item)
+                    }
+                    .navigationTitle("首页推荐")
+                    .toolbar {
+                        Button("刷新") {
+                            viewModel.fetchRecommendations()
                         }
-                        .navigationTitle("首页推荐")
                     }
                 }
-                .onAppear {
-                    viewModel.fetchRecommendations() // 视图出现时获取数据
-                }
+            }
+        } detail: {
+            if let selected = selection ?? viewModel.videoItems.first {
+                VideoDetailView(videoItem: selected)
+                    .navigationTitle(selected.title)
+            } else {
+                Text("选择一个视频查看详情")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .task {
+            viewModel.fetchRecommendations()
+        }
+        .onChange(of: viewModel.videoItems) { newItems in
+            if selection == nil {
+                selection = newItems.first
             }
         }
     }
 }
 
-// 单独的行视图，用于展示每个视频的信息
 struct VideoRow: View {
     let videoItem: VideoItem
 
     var body: some View {
-        HStack {
-            // 使用 AsyncImage (iOS 15+/macOS 12+/watchOS 8+/tvOS 15+) 加载网络图片
-            // 对于 visionOS，这是可用的
-            AsyncImage(url: URL(string: videoItem.coverImageURL)) {
-                phase in
-                if let image = phase.image {
-                    image.resizable()
-                         .aspectRatio(contentMode: .fit)
-                         .frame(width: 120, height: 70) // 调整封面大小
-                         .cornerRadius(8)
-                } else if phase.error != nil {
-                    Image(systemName: "photo") // 加载失败时的占位图
-                        .frame(width: 120, height: 70)
+        HStack(spacing: 12) {
+            AsyncImage(url: videoItem.coverImageURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 140, height: 80)
+                        .clipped()
+                        .cornerRadius(10)
+                case .failure:
+                    Image(systemName: "photo")
+                        .frame(width: 140, height: 80)
                         .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
-                } else {
-                    ProgressView() // 加载中的占位图
-                        .frame(width: 120, height: 70)
+                        .cornerRadius(10)
+                case .empty:
+                    ProgressView()
+                        .frame(width: 140, height: 80)
+                @unknown default:
+                    EmptyView()
                 }
             }
 
-            VStack(alignment: .leading) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(videoItem.title)
                     .font(.headline)
-                    .lineLimit(2) // 限制标题行数
+                    .lineLimit(2)
                 Text(videoItem.authorName)
                     .font(.subheadline)
-                    .foregroundColor(.gray)
+                    .foregroundStyle(.secondary)
+                Text("\(videoItem.viewCount.formatted(.number.notation(.compactName))) 次观看 · \(formattedDuration(videoItem.duration))")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
-            Spacer() // 把内容推到左边
+            Spacer()
         }
+        .padding(.vertical, 6)
+    }
+
+    private func formattedDuration(_ seconds: Int) -> String {
+        let minutes = seconds / 60
+        let remainingSeconds = seconds % 60
+        return String(format: "%d:%02d", minutes, remainingSeconds)
+    }
+}
+
+struct VideoDetailView: View {
+    let videoItem: VideoItem
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                AsyncImage(url: videoItem.coverImageURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .cornerRadius(16)
+                    case .failure:
+                        Image(systemName: "photo")
+                            .frame(maxWidth: .infinity, minHeight: 200)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(16)
+                    case .empty:
+                        ProgressView()
+                            .frame(maxWidth: .infinity, minHeight: 200)
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(videoItem.title)
+                        .font(.title2.weight(.bold))
+                    Text("UP: \(videoItem.authorName)")
+                        .font(.headline)
+                    Text("\(videoItem.viewCount.formatted(.number.notation(.compactName))) 次观看 · 时长 \(formattedDuration(videoItem.duration))")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding()
+        }
+    }
+
+    private func formattedDuration(_ seconds: Int) -> String {
+        let minutes = seconds / 60
+        let remainingSeconds = seconds % 60
+        return String(format: "%d:%02d", minutes, remainingSeconds)
     }
 }
 
