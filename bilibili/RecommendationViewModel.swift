@@ -1,4 +1,6 @@
 import SwiftUI
+import SwiftyJSON
+import Alamofire
 
 @MainActor // 确保对 UI 的更新在主线程进行
 class RecommendationViewModel: ObservableObject {
@@ -36,24 +38,26 @@ class RecommendationViewModel: ObservableObject {
                 ]
                 guard let url = components.url else { return }
 
-                var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 15)
-                request.setValue("https://www.bilibili.com", forHTTPHeaderField: "Referer")
-                request.setValue("Mozilla/5.0 (VisionOS) AppleWebKit/605.1.15 (KHTML, like Gecko)", forHTTPHeaderField: "User-Agent")
+                let headers: HTTPHeaders = [
+                    "Referer": "https://www.bilibili.com",
+                    "User-Agent": "Mozilla/5.0 (VisionOS) AppleWebKit/605.1.15 (KHTML, like Gecko)"
+                ]
 
-                let allCookies = HTTPCookieStorage.shared.cookies ?? []
-                let header = HTTPCookie.requestHeaderFields(with: allCookies)
-                header.forEach { key, value in
-                    request.addValue(value, forHTTPHeaderField: key)
-                }
+                let data = try await NetworkClient.shared
+                    .request(url, method: .get, headers: headers)
+                    .serializingData()
+                    .value
 
-                let (data, response) = try await session.data(for: request)
-                
-                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                    throw URLError(.badServerResponse)
-                }
-                let decodedResponse = try JSONDecoder().decode(RecommendationResponse.self, from: data)
-                let shuffled = decodedResponse.data.list.shuffled()
-                let uniqueNew = shuffled.filter { seenIDs.insert($0.id).inserted }
+                let json = try JSON(data: data)
+                let list = json["data"]["list"].arrayValue
+                let mapped: [VideoItem] = list.compactMap { VideoItem(json: $0) }
+                let uniqueNew = mapped.filter { seenIDs.insert($0.id).inserted }
+
+                #if DEBUG
+                let rawPreview = String(data: data, encoding: .utf8) ?? ""
+                print("Recommend code=\(json["code"].intValue) message=\(json["message"].stringValue) count=\(list.count) parsed=\(uniqueNew.count)")
+                print("Recommend raw preview: \(rawPreview.prefix(500))")
+                #endif
 
                 if uniqueNew.isEmpty {
                     hasMore = false
@@ -76,26 +80,5 @@ class RecommendationViewModel: ObservableObject {
         seenIDs.removeAll()
         videoItems = []
         fetchRecommendations()
-    }
-}
-
-extension RecommendationViewModel {
-    /// 用于 SwiftUI 预览的静态数据
-    static var preview: RecommendationViewModel {
-        let vm = RecommendationViewModel()
-        vm.videoItems = [
-            .mock(id: "BV1xx411c7mD", title: "史上最强 React Hooks 入门", author: "程序员小明", views: 1254000, duration: 754),
-            .mock(id: "BV1jj411k7Tp", title: "苹果 Vision Pro 初体验：空间计算的第一天", author: "数码评测社", views: 842331, duration: 612),
-            .mock(id: "BV1zz4y1A7QD", title: "如何在 30 天内自学 SwiftUI", author: "学习笔记本", views: 39214, duration: 445)
-        ]
-        return vm
-    }
-}
-
-private struct RecommendationResponse: Decodable {
-    let data: DataContainer
-
-    struct DataContainer: Decodable {
-        let list: [VideoItem]
     }
 }

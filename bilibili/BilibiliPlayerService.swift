@@ -1,4 +1,6 @@
 import Foundation
+import SwiftyJSON
+import AVKit
 
 struct BilibiliPlayerService {
     struct PlayInfo {
@@ -10,6 +12,7 @@ struct BilibiliPlayerService {
         case noPlayableURL
         case badResponse
         case apiError(code: Int, message: String)
+        case invalidURL
     }
 
     func fetchPlayURL(bvid: String, cid: Int?) async throws -> PlayInfo {
@@ -21,13 +24,15 @@ struct BilibiliPlayerService {
         }
 
         var components = URLComponents(string: "https://api.bilibili.com/x/player/playurl")!
-        components.queryItems = [
-            URLQueryItem(name: "bvid", value: bvid),
-            URLQueryItem(name: "cid", value: "\(resolvedCID)"),
-            URLQueryItem(name: "fnval", value: "16"), // HLS
-            URLQueryItem(name: "fourk", value: "1"),
-            URLQueryItem(name: "qn", value: "80")
-        ]
+        var signer = BilibiliWBI()
+        let signedParams = try await signer.sign(params: [
+            "bvid": bvid,
+            "cid": "\(resolvedCID)",
+            "fnval": "16",
+            "fourk": "1",
+            "qn": "80"
+        ])
+        components.queryItems = signedParams.map { URLQueryItem(name: $0.key, value: $0.value) }
         guard let url = components.url else { throw PlayerError.badResponse }
 
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 15)
@@ -45,16 +50,15 @@ struct BilibiliPlayerService {
             throw PlayerError.badResponse
         }
 
-        let decoded = try JSONDecoder().decode(PlayResponse.self, from: data)
-        if decoded.code != 0 {
-            throw PlayerError.apiError(code: decoded.code, message: decoded.message)
+        let json = try JSON(data: data)
+        if json["code"].intValue != 0 {
+            throw PlayerError.apiError(code: json["code"].intValue, message: json["message"].stringValue)
         }
-        if let urlString = decoded.data.durl.first?.url, let url = URL(string: urlString) {
+
+        if let urlString = json["data"]["durl"].arrayValue.first?["url"].string, let url = URL(string: urlString) {
             return PlayInfo(url: url)
         }
-        if let dash = decoded.data.dash,
-           let baseURL = dash.video.first?.baseURL,
-           let url = URL(string: baseURL) {
+        if let baseURL = json["data"]["dash"]["video"].arrayValue.first?["baseUrl"].string, let url = URL(string: baseURL) {
             return PlayInfo(url: url)
         }
 
@@ -84,42 +88,13 @@ struct BilibiliPlayerService {
             throw PlayerError.badResponse
         }
 
-        let decoded = try JSONDecoder().decode(PageListResponse.self, from: data)
-        if decoded.code != 0 { throw PlayerError.apiError(code: decoded.code, message: decoded.message) }
-        guard let first = decoded.data.first else { throw PlayerError.missingCID }
-        return first.cid
-    }
-}
-
-private struct PlayResponse: Decodable {
-    let code: Int
-    let message: String
-    let data: DataContainer
-
-    struct DataContainer: Decodable {
-        let durl: [Durl]
-        let dash: Dash?
-
-        struct Durl: Decodable {
-            let url: String
+        let json = try JSON(data: data)
+        if json["code"].intValue != 0 {
+            throw PlayerError.apiError(code: json["code"].intValue, message: json["message"].stringValue)
         }
-
-        struct Dash: Decodable {
-            let video: [Video]
-            struct Video: Decodable {
-                let baseURL: String
-                enum CodingKeys: String, CodingKey { case baseURL = "baseUrl" }
-            }
+        guard let firstCID = json["data"].arrayValue.first?["cid"].int else {
+            throw PlayerError.missingCID
         }
-    }
-}
-
-private struct PageListResponse: Decodable {
-    let code: Int
-    let message: String
-    let data: [Page]
-
-    struct Page: Decodable {
-        let cid: Int
+        return firstCID
     }
 }

@@ -1,4 +1,6 @@
 import SwiftUI
+import SwiftyJSON
+import Alamofire
 
 @MainActor
 final class FollowFeedViewModel: ObservableObject {
@@ -12,6 +14,7 @@ final class FollowFeedViewModel: ObservableObject {
         let config = URLSessionConfiguration.default
         config.httpCookieStorage = HTTPCookieStorage.shared
         config.httpShouldSetCookies = true
+        config.httpShouldUsePipelining = true
         return URLSession(configuration: config)
     }()
     private var page: Int = 1
@@ -42,163 +45,79 @@ final class FollowFeedViewModel: ObservableObject {
                 ]
                 guard let url = components.url else { return }
 
-                var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
-                request.setValue("https://www.bilibili.com", forHTTPHeaderField: "Referer")
-                request.setValue("Mozilla/5.0 (VisionOS) AppleWebKit/605.1.15 (KHTML, like Gecko)", forHTTPHeaderField: "User-Agent")
+                let headers: HTTPHeaders = [
+                    "Referer": "https://www.bilibili.com",
+                    "User-Agent": "Mozilla/5.0 (VisionOS) AppleWebKit/605.1.15 (KHTML, like Gecko)"
+                ]
 
                 let allCookies = HTTPCookieStorage.shared.cookies ?? []
-                let header = HTTPCookie.requestHeaderFields(with: allCookies)
-                header.forEach { key, value in
-                    request.addValue(value, forHTTPHeaderField: key)
-                }
 
-                let (data, response) = try await session.data(for: request)
-                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                    throw URLError(.badServerResponse)
-                }
+                let data = try await NetworkClient.shared
+                    .request(url, method: .get, headers: headers)
+                    .serializingData()
+                    .value
 
-                let decoded = try JSONDecoder().decode(FollowFeedResponse.self, from: data)
+                let json = try JSON(data: data)
                 #if DEBUG
-                let raw = String(data: data, encoding: .utf8) ?? ""
-                print("Follow feed code=\(decoded.code) message=\(decoded.message) items=\(decoded.data?.items.count ?? 0)")
-                print("Follow feed raw preview: \(raw.prefix(2000))")
-                #endif
-                if decoded.code != 0 {
-                    throw NSError(domain: "FollowFeed", code: decoded.code, userInfo: [NSLocalizedDescriptionKey: decoded.message])
+                let rawPreview = String(data: data, encoding: .utf8) ?? ""
+                let cookieString = allCookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+        print("Follow feed cookies: \(cookieString)")
+        print("Follow feed code=\(json["code"].intValue) message=\(json["message"].stringValue) items=\(json["data"]["items"].arrayValue.count)")
+        print("Follow feed raw preview: \(rawPreview.prefix(2000))")
+        #endif
+
+                if json["code"].intValue != 0 {
+                    throw NSError(domain: "FollowFeed", code: json["code"].intValue, userInfo: [NSLocalizedDescriptionKey: json["message"].stringValue])
                 }
 
-                guard let items = decoded.data?.items else {
-                    errorMessage = "关注流为空（data 为 nil）"
-                    videoItems = []
-                    return
+                let items = json["data"]["items"].arrayValue
+                let videos: [VideoItem] = items.compactMap { item in
+                    let modules = item["modules"]
+                    let authorName = modules["module_author"]["name"].string ?? "未知UP"
+                    let major = modules["module_dynamic"]["major"]
+
+                    if major["archive"].dictionary != nil {
+                        let archive = major["archive"]
+                        let bvid = archive["bvid"].stringValue
+                        let title = archive["title"].stringValue
+                        guard let coverURL = URL(string: archive["cover"].stringValue) else { return nil }
+                        let duration = archive["duration"].int ?? parseDuration(text: archive["durationText"].string)
+                        let cid = archive["cid"].int
+                        let plays = archive["stat"]["play"].int ?? 0
+                        return VideoItem(id: bvid, title: title, coverImageURL: coverURL, authorName: authorName, viewCount: plays, duration: duration, cid: cid)
+                    } else if major["pgc"].dictionary != nil {
+                        let pgc = major["pgc"]
+                        let bvid = pgc["bvid"].string ?? UUID().uuidString
+                        let title = pgc["title"].string ?? pgc["ep_title"].string ?? "PGC"
+                        guard let coverURL = URL(string: pgc["cover"].stringValue) else { return nil }
+                        let duration = pgc["duration"].int ?? parseDuration(text: pgc["duration_text"].string)
+                        let cid = pgc["cid"].int
+                        let plays = pgc["stat"]["play"].int ?? 0
+                        return VideoItem(id: bvid, title: title, coverImageURL: coverURL, authorName: authorName, viewCount: plays, duration: duration, cid: cid)
+                    }
+                    return nil
                 }
 
-                let archives = items.compactMap { $0.toVideoItem }
-                if archives.isEmpty {
+                if videos.isEmpty {
                     errorMessage = "关注流为空或解析失败"
                 }
-                videoItems.append(contentsOf: archives)
+
+                videoItems.append(contentsOf: videos)
                 page += 1
-                hasMore = !archives.isEmpty
+                hasMore = json["data"]["has_more"].boolValue && !videos.isEmpty
             } catch {
                 errorMessage = "获取关注动态失败：\(error.localizedDescription)"
             }
             isLoading = false
         }
     }
-}
-
-private struct FollowFeedResponse: Decodable {
-    let code: Int
-    let message: String
-    let data: DataContainer?
-
-    struct DataContainer: Decodable {
-        let items: [DynamicItem]
-    }
-
-    struct DynamicItem: Decodable {
-        let modules: Modules
-
-        struct Modules: Decodable {
-            let moduleDynamic: ModuleDynamic
-            let moduleAuthor: ModuleAuthor
-
-            struct ModuleDynamic: Decodable {
-                let major: Major?
-
-                struct Major: Decodable {
-                    let type: String?
-                    let archive: Archive?
-                    let pgc: Pgc?
-
-                    struct Archive: Decodable {
-                        let bvid: String
-                        let title: String
-                        let cover: String
-                        let durationText: String?
-                        let duration: Int?
-                        let stat: Stat?
-
-                        struct Stat: Decodable {
-                            let play: Int?
-                        }
-                    }
-
-                    struct Pgc: Decodable {
-                        let bvid: String?
-                        let cover: String
-                        let title: String?
-                        let epTitle: String?
-                        let duration: Int?
-                        let durationText: String?
-                        let stat: Stat?
-
-                        enum CodingKeys: String, CodingKey {
-                            case bvid
-                            case cover
-                            case title
-                            case epTitle = "ep_title"
-                            case duration
-                            case durationText = "duration_text"
-                            case stat
-                        }
-
-                        struct Stat: Decodable {
-                            let play: Int?
-                        }
-                    }
-                }
-            }
-
-            struct ModuleAuthor: Decodable {
-                let name: String
-            }
-        }
-
-        var toVideoItem: VideoItem? {
-            guard let major = modules.moduleDynamic.major else { return nil }
-
-            if let archive = major.archive, let coverURL = URL(string: archive.cover) {
-                let dur = parseDuration(seconds: archive.duration, text: archive.durationText)
-                return VideoItem(
-                    id: archive.bvid,
-                    title: archive.title,
-                    coverImageURL: coverURL,
-                    authorName: modules.moduleAuthor.name,
-                    viewCount: archive.stat?.play ?? 0,
-                    duration: dur,
-                    cid: nil
-                )
-            }
-
-            if let pgc = major.pgc,
-               let coverURL = URL(string: pgc.cover) {
-                let dur = parseDuration(seconds: pgc.duration, text: pgc.durationText)
-                let title = pgc.title ?? pgc.epTitle ?? "PGC"
-                let vid = pgc.bvid ?? UUID().uuidString
-                return VideoItem(
-                    id: vid,
-                    title: title,
-                    coverImageURL: coverURL,
-                    authorName: modules.moduleAuthor.name,
-                    viewCount: pgc.stat?.play ?? 0,
-                    duration: dur,
-                    cid: nil
-                )
-            }
-
-            return nil
-        }
-
-        private func parseDuration(seconds: Int?, text: String?) -> Int {
-            if let seconds { return seconds }
-            guard let text else { return 0 }
-            let parts = text.split(separator: ":").compactMap { Int($0) }
-            return parts.reversed().enumerated().reduce(0) { acc, pair in
-                let (idx, val) = pair
-                return acc + val * Int(pow(60.0, Double(idx)))
-            }
+    
+    private func parseDuration(text: String?) -> Int {
+        guard let text else { return 0 }
+        let parts = text.split(separator: ":").compactMap { Int($0) }
+        return parts.reversed().enumerated().reduce(0) { acc, pair in
+            let (idx, val) = pair
+            return acc + val * Int(pow(60.0, Double(idx)))
         }
     }
 }

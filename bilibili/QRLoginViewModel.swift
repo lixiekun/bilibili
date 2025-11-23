@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreImage.CIFilterBuiltins
+import Alamofire
 
 @MainActor
 final class QRLoginViewModel: ObservableObject {
@@ -19,13 +20,6 @@ final class QRLoginViewModel: ObservableObject {
     private let context = CIContext()
     private let qrFilter = CIFilter.qrCodeGenerator()
     private var pollTask: Task<Void, Never>?
-    private let session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.httpCookieStorage = HTTPCookieStorage.shared
-        config.httpShouldSetCookies = true
-        return URLSession(configuration: config)
-    }()
-
     private struct GenerateResponse: Decodable {
         struct Data: Decodable { let url: String; let qrcode_key: String }
         let code: Int
@@ -53,9 +47,11 @@ final class QRLoginViewModel: ObservableObject {
         Task {
             do {
                 let generateURL = URL(string: "https://passport.bilibili.com/x/passport-login/web/qrcode/generate")!
-                var request = URLRequest(url: generateURL)
-                request.setValue("https://www.bilibili.com", forHTTPHeaderField: "Referer")
-                let (data, _) = try await session.data(for: request)
+                let headers: HTTPHeaders = ["Referer": "https://www.bilibili.com"]
+                let data = try await NetworkClient.shared
+                    .request(generateURL, method: .get, headers: headers)
+                    .serializingData()
+                    .value
                 let decoded = try JSONDecoder().decode(GenerateResponse.self, from: data)
                 guard decoded.code == 0 else {
                     throw URLError(.badServerResponse)
@@ -89,9 +85,11 @@ final class QRLoginViewModel: ObservableObject {
                     try await Task.sleep(nanoseconds: 2_000_000_000) // 2s
                     guard case .scanning = state else { return }
                     let pollURL = URL(string: "https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=\(key)")!
-                    var request = URLRequest(url: pollURL)
-                    request.setValue("https://www.bilibili.com", forHTTPHeaderField: "Referer")
-                    let (data, _) = try await session.data(for: request)
+                    let headers: HTTPHeaders = ["Referer": "https://www.bilibili.com"]
+                    let data = try await NetworkClient.shared
+                        .request(pollURL, method: .get, headers: headers)
+                        .serializingData()
+                        .value
                     let decoded = try JSONDecoder().decode(PollResponse.self, from: data)
 
                     // data.code: 0=成功, 86038=二维码失效, 86090=已扫码未确认, 86039=未扫码
@@ -130,14 +128,21 @@ final class QRLoginViewModel: ObservableObject {
     private func fetchUserProfile() async {
         do {
             let navURL = URL(string: "https://api.bilibili.com/x/web-interface/nav")!
-            var request = URLRequest(url: navURL)
-            request.setValue("https://www.bilibili.com", forHTTPHeaderField: "Referer")
-            request.setValue("Mozilla/5.0 (VisionOS) AppleWebKit/605.1.15 (KHTML, like Gecko)", forHTTPHeaderField: "User-Agent")
+            let headers: HTTPHeaders = [
+                "Referer": "https://www.bilibili.com",
+                "User-Agent": "Mozilla/5.0 (VisionOS) AppleWebKit/605.1.15 (KHTML, like Gecko)"
+            ]
 
-            let (data, response) = try await session.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                return
+            let data = try await NetworkClient.shared
+                .request(navURL, method: .get, headers: headers)
+                .serializingData()
+                .value
+
+            #if DEBUG
+            if let raw = String(data: data, encoding: .utf8) {
+                print("Nav response raw: \(raw)")
             }
+            #endif
 
             struct NavResponse: Decodable {
                 struct Data: Decodable {

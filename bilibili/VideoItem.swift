@@ -1,7 +1,8 @@
 import Foundation
+import SwiftyJSON
 
-/// 精简后的视频数据模型，对应 Bilibili popular 接口的核心字段。
-struct VideoItem: Identifiable, Decodable, Hashable {
+/// 精简后的视频数据模型，对应 Bilibili popular/动态等接口的核心字段。
+struct VideoItem: Identifiable, Hashable {
     let id: String // bvid
     let title: String
     let coverImageURL: URL
@@ -10,50 +11,16 @@ struct VideoItem: Identifiable, Decodable, Hashable {
     let duration: Int // 单位：秒
     let cid: Int?
 
-    enum CodingKeys: String, CodingKey {
-        case id = "bvid"
-        case title
-        case coverImageURL = "pic"
-        case owner
-        case stat
-        case duration
-        case cid
-    }
-
-    enum OwnerKeys: String, CodingKey {
-        case name
-    }
-
-    enum StatKeys: String, CodingKey {
-        case view
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(String.self, forKey: .id)
-        title = try container.decode(String.self, forKey: .title)
-        let coverURL = try container.decodeIfPresent(URL.self, forKey: .coverImageURL)
-        coverImageURL = coverURL ?? URL(string: "https://i0.hdslb.com/bfs/archive/placeholder.jpg")!
-
-        let ownerContainer = try container.nestedContainer(keyedBy: OwnerKeys.self, forKey: .owner)
-        authorName = try ownerContainer.decode(String.self, forKey: .name)
-
-        let statContainer = try container.nestedContainer(keyedBy: StatKeys.self, forKey: .stat)
-        viewCount = try statContainer.decodeIfPresent(Int.self, forKey: .view) ?? 0
-
-        duration = try container.decodeIfPresent(Int.self, forKey: .duration) ?? 0
-        cid = try container.decodeIfPresent(Int.self, forKey: .cid)
-    }
-
-    init(
+    init?(
         id: String,
         title: String,
-        coverImageURL: URL,
+        coverImageURL: URL?,
         authorName: String,
         viewCount: Int,
         duration: Int,
         cid: Int?
     ) {
+        guard let coverImageURL else { return nil }
         self.id = id
         self.title = title
         self.coverImageURL = coverImageURL
@@ -62,12 +29,34 @@ struct VideoItem: Identifiable, Decodable, Hashable {
         self.duration = duration
         self.cid = cid
     }
+
+    init?(json: JSON) {
+        let id = json["bvid"].string ?? json["id"].string ?? ""
+        let title = json["title"].string ?? ""
+        let coverString = json["pic"].string ?? json["cover"].string
+        let authorName = json["owner"]["name"].string ?? json["module_author"]["name"].string ?? "未知UP"
+        let viewCount = json["stat"]["view"].int ?? json["stat"]["play"].int ?? 0
+        let duration = json["duration"].int ?? VideoItem.parseDuration(text: json["durationText"].string ?? json["duration_text"].string)
+        let cid = json["cid"].int
+
+        guard !id.isEmpty, !title.isEmpty, let coverURL = URL(string: coverString ?? "") else { return nil }
+        self.init(id: id, title: title, coverImageURL: coverURL, authorName: authorName, viewCount: viewCount, duration: duration, cid: cid)
+    }
+
+    private static func parseDuration(text: String?) -> Int {
+        guard let text else { return 0 }
+        let parts = text.split(separator: ":").compactMap { Int($0) }
+        return parts.reversed().enumerated().reduce(0) { acc, pair in
+            let (idx, val) = pair
+            return acc + val * Int(pow(60.0, Double(idx)))
+        }
+    }
 }
 
 // MARK: - Preview helpers
 extension VideoItem {
     static func mock(id: String, title: String, author: String, views: Int, duration: Int) -> VideoItem {
-        VideoItem(
+        return VideoItem(
             id: id,
             title: title,
             coverImageURL: URL(string: "https://i0.hdslb.com/bfs/archive/placeholder.jpg")!,
@@ -75,6 +64,6 @@ extension VideoItem {
             viewCount: views,
             duration: duration,
             cid: 0
-        )
+        )!
     }
 }

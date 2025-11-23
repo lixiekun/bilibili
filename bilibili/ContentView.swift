@@ -15,6 +15,7 @@ struct ContentView: View {
     @StateObject private var loginViewModel = QRLoginViewModel()
     @State private var isShowingLogin = false
     @State private var selectedTab: Tab = .recommend
+    @Environment(\.openWindow) private var openWindow
     private let autoLoad: Bool
 
     @MainActor
@@ -47,8 +48,38 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if activeViewModel.videoItems.isEmpty {
+                    contentView
+                        .navigationTitle(selectedTab == .recommend ? "首页推荐" : "关注动态")
+                        .toolbar {
+                            Button("刷新") {
+                                reload()
+                            }
+//                            .disabled(viewModel.isLoading)
+                            if let profile = loginViewModel.userProfile {
+                                AsyncImage(url: profile.face) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .scaledToFill()
+                                    default:
+                                        Image(systemName: "person.crop.circle")
+                                    }
+                                }
+                                .frame(width: 28, height: 28)
+                                .clipShape(Circle())
+                                .overlay(Circle().stroke(Color.white.opacity(0.2)))
+                                .accessibilityLabel(Text(profile.uname))
+                            } else {
+                                Button("扫码登录") {
+                                    isShowingLogin = true
+                                    loginViewModel.startLogin()
+                                }
+                            }
+                        }
                     Text("暂无内容")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    
                 } else {
                     contentView
                         .navigationTitle(selectedTab == .recommend ? "首页推荐" : "关注动态")
@@ -56,7 +87,7 @@ struct ContentView: View {
                             Button("刷新") {
                                 reload()
                             }
-                            .disabled(viewModel.isLoading)
+//                            .disabled(viewModel.isLoading)
                             if let profile = loginViewModel.userProfile {
                                 AsyncImage(url: profile.face) { phase in
                                     switch phase {
@@ -178,6 +209,7 @@ struct ContentView: View {
     }
 
     private func reload() {
+        print("11111")
         switch selectedTab {
         case .recommend:
             viewModel.refresh()
@@ -423,6 +455,7 @@ struct VideoDetailView: View {
     @State private var isResolving = false
     @State private var playError: String?
     private let playerService = BilibiliPlayerService()
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         ScrollView {
@@ -522,19 +555,7 @@ struct VideoDetailView: View {
             do {
                 let info = try await playerService.fetchPlayURL(bvid: videoItem.id, cid: videoItem.cid)
 
-                var headers: [String: String] = [
-                    "User-Agent": "Mozilla/5.0 (VisionOS) AppleWebKit/605.1.15 (KHTML, like Gecko)",
-                    "Referer": "https://www.bilibili.com"
-                ]
-                if let cookies = HTTPCookieStorage.shared.cookies, !cookies.isEmpty {
-                    let cookieString = cookies.compactMap { "\($0.name)=\($0.value)" }.joined(separator: "; ")
-                    headers["Cookie"] = cookieString
-                }
-
-                let asset = AVURLAsset(url: info.url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-                let item = AVPlayerItem(asset: asset)
-                player = AVPlayer(playerItem: item)
-                isPresentingPlayer = true
+                openWindow(id: "PlayerWindow", value: info.url.absoluteString)
             } catch {
                 if case BilibiliPlayerService.PlayerError.apiError(let code, let message) = error {
                     playError = "无法播放：\(message) (code \(code))"
@@ -666,5 +687,5 @@ struct QRLoginView: View {
 }
 
 #Preview {
-    ContentView(viewModel: .preview, autoLoad: false)
+    ContentView(viewModel: RecommendationViewModel(), autoLoad: false)
 }
