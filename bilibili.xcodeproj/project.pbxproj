@@ -23,7 +23,6 @@
 
 /* Begin PBXFileReference section */
 		6BD4905F2DE60A6000A0CA2C /* bilibili.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = bilibili.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		6BD490632DE60A6000A0CA2C /* RealityKitContent */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = RealityKitContent; sourceTree = "<group>"; };
 		6BD490712DE60A6100A0CA2C /* bilibiliTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = bilibiliTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -77,7 +76,6 @@
 			isa = PBXGroup;
 			children = (
 				6BD490612DE60A6000A0CA2C /* bilibili */,
-				6BD490622DE60A6000A0CA2C /* Packages */,
 				6BD490742DE60A6100A0CA2C /* bilibiliTests */,
 				6BD490602DE60A6000A0CA2C /* Products */,
 			);
@@ -90,14 +88,6 @@
 				6BD490712DE60A6100A0CA2C /* bilibiliTests.xctest */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		6BD490622DE60A6000A0CA2C /* Packages */ = {
-			isa = PBXGroup;
-			children = (
-				6BD490632DE60A6000A0CA2C /* RealityKitContent */,
-			);
-			path = Packages;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
