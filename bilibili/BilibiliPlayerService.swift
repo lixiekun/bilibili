@@ -1,6 +1,7 @@
 import Foundation
 import SwiftyJSON
 import AVKit
+import Alamofire
 
 struct BilibiliPlayerService {
     struct PlayInfo {
@@ -23,46 +24,108 @@ struct BilibiliPlayerService {
             resolvedCID = try await fetchCID(bvid: bvid)
         }
 
+        // 多档清晰度尝试，优先高，再降级，强制选 AVC 流
+        let qnList = [120, 112, 80]
+        for qn in qnList {
+            // 先尝试 dash（fnval 16，含 AVC HLS），不行再 durl/mp4
+            if let info = try await requestPlayURL(bvid: bvid, cid: resolvedCID, qn: qn, fnval: 16) {
+                return info
+            }
+            if let info = try await requestPlayURL(bvid: bvid, cid: resolvedCID, qn: qn, fnval: 0) {
+                return info
+            }
+        }
+        throw PlayerError.noPlayableURL
+    }
+
+    private func requestPlayURL(bvid: String, cid: Int, qn: Int, fnval: Int) async throws -> PlayInfo? {
         var components = URLComponents(string: "https://api.bilibili.com/x/player/playurl")!
         var signer = BilibiliWBI()
         let signedParams = try await signer.sign(params: [
             "bvid": bvid,
-            "cid": "\(resolvedCID)",
-            "fnval": "16",
+            "cid": "\(cid)",
+            "fnval": "\(fnval)", // 0: durl/mp4, 16: dash/HLS
             "fourk": "1",
-            "qn": "80"
+            "qn": "\(qn)",
+            "fnver": "0",
+            "platform": "pc",
+            "otype": "json"
         ])
         components.queryItems = signedParams.map { URLQueryItem(name: $0.key, value: $0.value) }
         guard let url = components.url else { throw PlayerError.badResponse }
 
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 15)
-        request.setValue("https://www.bilibili.com", forHTTPHeaderField: "Referer")
-        request.setValue("Mozilla/5.0 (VisionOS) AppleWebKit/605.1.15 (KHTML, like Gecko)", forHTTPHeaderField: "User-Agent")
+        let headers: HTTPHeaders = [
+            "Referer": "https://www.bilibili.com",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        ]
 
-        let cookies = HTTPCookieStorage.shared.cookies ?? []
-        let header = HTTPCookie.requestHeaderFields(with: cookies)
-        header.forEach { key, value in
-            request.addValue(value, forHTTPHeaderField: key)
-        }
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw PlayerError.badResponse
-        }
+        let data = try await NetworkClient.shared
+            .request(url, method: .get, headers: headers)
+            .serializingData()
+            .value
 
         let json = try JSON(data: data)
+        #if DEBUG
+        print("playurl qn=\(qn) fnval=\(fnval) request url=\(url.absoluteString)")
+        print("playurl response code=\(json["code"].intValue) message=\(json["message"].stringValue) quality=\(json["data"]["quality"].intValue) format=\(json["data"]["format"].stringValue) codecid=\(json["data"]["video_codecid"].intValue)")
+        print("playurl raw preview: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "")")
+        #endif
         if json["code"].intValue != 0 {
             throw PlayerError.apiError(code: json["code"].intValue, message: json["message"].stringValue)
         }
 
-        if let urlString = json["data"]["durl"].arrayValue.first?["url"].string, let url = URL(string: urlString) {
-            return PlayInfo(url: url)
-        }
-        if let baseURL = json["data"]["dash"]["video"].arrayValue.first?["baseUrl"].string, let url = URL(string: baseURL) {
-            return PlayInfo(url: url)
+        // 如果顶层标记的编码不是 AVC，直接跳过这一档
+        let topCodec = json["data"]["video_codecid"].intValue
+        if topCodec != 0 && topCodec != 7 {
+            #if DEBUG
+            print("skip non-AVC top codec: \(topCodec)")
+            #endif
+            return nil
         }
 
-        throw PlayerError.noPlayableURL
+        // 优先 durl/mp4，若有 backup_url 优先使用
+        if let durl = json["data"]["durl"].arrayValue.first {
+            let primary = durl["url"].string
+            let backup = durl["backup_url"].arrayValue.first?.string
+            let chosen = backup ?? primary
+            if let chosen, let url = URL(string: chosen) {
+                #if DEBUG
+                print("playurl selected durl qn=\(qn) fnval=\(fnval) primary=\(primary?.prefix(80) ?? "") backup=\(backup?.prefix(80) ?? "") chosen=\(chosen.prefix(120))")
+                #endif
+                return PlayInfo(url: url)
+            }
+        }
+
+        // 如无 durl 再尝试 dash AVC
+        if let dash = json["data"]["dash"].dictionary {
+            let hasHDR = dash["hdr"] != nil || dash["dolby"] != nil
+            if hasHDR {
+                #if DEBUG
+                print("skip dash because of HDR/Dolby")
+                #endif
+                return nil
+            }
+            let videos = dash["video"]?.arrayValue ?? []
+            let sorted = videos.sorted { $0["id"].intValue > $1["id"].intValue }
+            if let avc = sorted.first(where: { $0["codecid"].intValue == 7 }),
+               let baseURL = avc["baseUrl"].string ?? avc["base_url"].string,
+               let url = URL(string: baseURL) {
+                #if DEBUG
+                print("playurl selected dash AVC id=\(avc["id"].intValue) url=\(baseURL.prefix(120))")
+                #endif
+                return PlayInfo(url: url)
+            }
+            if let first = sorted.first,
+               let baseURL = first["baseUrl"].string ?? first["base_url"].string,
+               let url = URL(string: baseURL) {
+                #if DEBUG
+                print("playurl selected dash fallback id=\(first["id"].intValue) url=\(baseURL.prefix(120))")
+                #endif
+                return PlayInfo(url: url)
+            }
+        }
+
+        return nil
     }
 
     private func fetchCID(bvid: String) async throws -> Int {
@@ -73,22 +136,22 @@ struct BilibiliPlayerService {
         ]
         guard let url = components.url else { throw PlayerError.badResponse }
 
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 15)
-        request.setValue("https://www.bilibili.com", forHTTPHeaderField: "Referer")
-        request.setValue("Mozilla/5.0 (VisionOS) AppleWebKit/605.1.15 (KHTML, like Gecko)", forHTTPHeaderField: "User-Agent")
+        let headers: HTTPHeaders = [
+            "Referer": "https://www.bilibili.com",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        ]
 
-        let cookies = HTTPCookieStorage.shared.cookies ?? []
-        let header = HTTPCookie.requestHeaderFields(with: cookies)
-        header.forEach { key, value in
-            request.addValue(value, forHTTPHeaderField: key)
-        }
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw PlayerError.badResponse
-        }
+        let data = try await NetworkClient.shared
+            .request(url, method: .get, headers: headers)
+            .serializingData()
+            .value
 
         let json = try JSON(data: data)
+        #if DEBUG
+        print("pagelist url=\(url.absoluteString)")
+        print("pagelist code=\(json["code"].intValue) message=\(json["message"].stringValue) cid=\(json["data"].arrayValue.first?["cid"].int ?? -1)")
+        print("pagelist raw preview: \(String(data: data, encoding: .utf8)?.prefix(300) ?? "")")
+        #endif
         if json["code"].intValue != 0 {
             throw PlayerError.apiError(code: json["code"].intValue, message: json["message"].stringValue)
         }

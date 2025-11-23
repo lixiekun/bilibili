@@ -54,9 +54,7 @@ class RecommendationViewModel: ObservableObject {
                 let uniqueNew = mapped.filter { seenIDs.insert($0.id).inserted }
 
                 #if DEBUG
-                let rawPreview = String(data: data, encoding: .utf8) ?? ""
-                print("Recommend code=\(json["code"].intValue) message=\(json["message"].stringValue) count=\(list.count) parsed=\(uniqueNew.count)")
-                print("Recommend raw preview: \(rawPreview.prefix(500))")
+
                 #endif
 
                 if uniqueNew.isEmpty {

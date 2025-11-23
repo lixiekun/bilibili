@@ -61,9 +61,9 @@ final class FollowFeedViewModel: ObservableObject {
                 #if DEBUG
                 let rawPreview = String(data: data, encoding: .utf8) ?? ""
                 let cookieString = allCookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
-        print("Follow feed cookies: \(cookieString)")
-        print("Follow feed code=\(json["code"].intValue) message=\(json["message"].stringValue) items=\(json["data"]["items"].arrayValue.count)")
-        print("Follow feed raw preview: \(rawPreview.prefix(2000))")
+        // print("Follow feed cookies: \(cookieString)")
+        // print("Follow feed code=\(json["code"].intValue) message=\(json["message"].stringValue) items=\(json["data"]["items"].arrayValue.count)")
+        // print("Follow feed raw preview: \(rawPreview.prefix(2000))")
         #endif
 
                 if json["code"].intValue != 0 {

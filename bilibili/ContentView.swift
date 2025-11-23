@@ -557,6 +557,9 @@ struct VideoDetailView: View {
 
                 openWindow(id: "PlayerWindow", value: info.url.absoluteString)
             } catch {
+                #if DEBUG
+                print("playback failed for \(videoItem.id): \(error)")
+                #endif
                 if case BilibiliPlayerService.PlayerError.apiError(let code, let message) = error {
                     playError = "无法播放：\(message) (code \(code))"
                 } else if case BilibiliPlayerService.PlayerError.missingCID = error {
