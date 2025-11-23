@@ -4,13 +4,12 @@ import AVKit
 struct PlayerWindowView: View {
     let url: URL
     @State private var player: AVPlayer?
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ZStack {
             if let player {
-                VideoPlayer(player: player)
+                PlayerControllerView(player: player)
                     .ignoresSafeArea()
             } else {
                 ProgressView("正在加载播放器…")
@@ -20,6 +19,7 @@ struct PlayerWindowView: View {
             VStack {
                 HStack {
                     Button {
+                        stopAndCleanup()
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
@@ -66,5 +66,21 @@ struct PlayerWindowView: View {
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         player = nil
+    }
+}
+
+private struct PlayerControllerView: UIViewControllerRepresentable {
+    let player: AVPlayer
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let vc = AVPlayerViewController()
+        vc.player = player
+        vc.showsPlaybackControls = true
+        vc.exitsFullScreenWhenPlaybackEnds = true
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
+        uiViewController.player = player
     }
 }
