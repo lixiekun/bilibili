@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		6BAA29F52ED2DD9900A7540D /* SwiftyJSON in Frameworks */ = {isa = PBXBuildFile; productRef = 6BAA29F42ED2DD9900A7540D /* SwiftyJSON */; };
 		6BAA2A032ED2E7C900A7540D /* Alamofire in Frameworks */ = {isa = PBXBuildFile; productRef = 6BAA2A022ED2E7C900A7540D /* Alamofire */; };
-		6BD490652DE60A6000A0CA2C /* RealityKitContent in Frameworks */ = {isa = PBXBuildFile; productRef = 6BD490642DE60A6000A0CA2C /* RealityKitContent */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -61,7 +60,6 @@
 			files = (
 				6BAA2A032ED2E7C900A7540D /* Alamofire in Frameworks */,
 				6BAA29F52ED2DD9900A7540D /* SwiftyJSON in Frameworks */,
-				6BD490652DE60A6000A0CA2C /* RealityKitContent in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -260,6 +258,7 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 26.0;
 			};
 			name = Debug;
 		};
@@ -284,6 +283,7 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 26.0;
 			};
 			name = Release;
 		};
