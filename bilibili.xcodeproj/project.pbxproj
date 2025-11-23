@@ -110,7 +110,6 @@
 			);
 			name = bilibili;
 			packageProductDependencies = (
-				6BD490642DE60A6000A0CA2C /* RealityKitContent */,
 				6BAA29F42ED2DD9900A7540D /* SwiftyJSON */,
 				6BAA2A022ED2E7C900A7540D /* Alamofire */,
 			);
@@ -495,10 +494,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 6BAA2A012ED2E7C900A7540D /* XCRemoteSwiftPackageReference "Alamofire" */;
 			productName = Alamofire;
-		};
-		6BD490642DE60A6000A0CA2C /* RealityKitContent */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = RealityKitContent;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

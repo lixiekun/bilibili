@@ -4,58 +4,45 @@ import AVKit
 struct PlayerWindowView: View {
     let url: URL
     @State private var player: AVPlayer?
-    @State private var showOverlay = true
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ZStack {
             if let player {
-                PlayerControllerView(player: player)
-                    .onDisappear {
-                        stopAndCleanup()
-                    }
-                    .onTapGesture { showOverlay.toggle() }
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
             } else {
                 ProgressView("正在加载播放器…")
             }
 
-            if showOverlay {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        Button {
-                            player?.play()
-                        } label: {
-                            Image(systemName: "play.fill")
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button {
-                            player?.pause()
-                        } label: {
-                            Image(systemName: "pause.fill")
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button {
-                            stopAndCleanup()
-                        } label: {
-                            Image(systemName: "xmark")
-                        }
-                        .buttonStyle(.bordered)
+            // 自定义关闭按钮 - 悬浮在左上角
+            VStack {
+                HStack {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(12)
                     }
-                    .padding()
+                    .background(.black.opacity(0.5), in: Circle())
+                    .buttonStyle(.plain)
+                    .hoverEffect()
+                    .padding(.leading, 20)
+                    .padding(.top, 20)
+                    
+                    Spacer()
                 }
+                Spacer()
             }
         }
         .task {
             await configurePlayer()
         }
-        .onChange(of: scenePhase) { phase in
-            if phase != .active {
-                stopAndCleanup()
-            }
+        .onDisappear {
+            stopAndCleanup()
         }
     }
 
@@ -79,20 +66,5 @@ struct PlayerWindowView: View {
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         player = nil
-    }
-}
-
-private struct PlayerControllerView: UIViewControllerRepresentable {
-    let player: AVPlayer
-
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let vc = AVPlayerViewController()
-        vc.player = player
-        vc.showsPlaybackControls = true
-        return vc
-    }
-
-    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
-        uiViewController.player = player
     }
 }

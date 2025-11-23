@@ -74,15 +74,6 @@ struct BilibiliPlayerService {
             throw PlayerError.apiError(code: json["code"].intValue, message: json["message"].stringValue)
         }
 
-        // 如果顶层标记的编码不是 AVC，直接跳过这一档
-        let topCodec = json["data"]["video_codecid"].intValue
-        if topCodec != 0 && topCodec != 7 {
-            #if DEBUG
-            print("skip non-AVC top codec: \(topCodec)")
-            #endif
-            return nil
-        }
-
         // 优先 durl/mp4，若有 backup_url 优先使用
         if let durl = json["data"]["durl"].arrayValue.first {
             let primary = durl["url"].string
@@ -107,6 +98,20 @@ struct BilibiliPlayerService {
             }
             let videos = dash["video"]?.arrayValue ?? []
             let sorted = videos.sorted { $0["id"].intValue > $1["id"].intValue }
+            
+            // 1. 尝试 HEVC (codecid 12) - 适合真机，模拟器可能绿屏
+            #if !targetEnvironment(simulator)
+            if let hevc = sorted.first(where: { $0["codecid"].intValue == 12 }),
+               let baseURL = hevc["baseUrl"].string ?? hevc["base_url"].string,
+               let url = URL(string: baseURL) {
+                #if DEBUG
+                print("playurl selected dash HEVC id=\(hevc["id"].intValue) url=\(baseURL.prefix(120))")
+                #endif
+                return PlayInfo(url: url)
+            }
+            #endif
+            
+            // 2. 尝试 AVC (codecid 7) - 兼容性最好
             if let avc = sorted.first(where: { $0["codecid"].intValue == 7 }),
                let baseURL = avc["baseUrl"].string ?? avc["base_url"].string,
                let url = URL(string: baseURL) {
@@ -115,11 +120,13 @@ struct BilibiliPlayerService {
                 #endif
                 return PlayInfo(url: url)
             }
+            
+            // 3. 兜底 (任意格式)
             if let first = sorted.first,
                let baseURL = first["baseUrl"].string ?? first["base_url"].string,
                let url = URL(string: baseURL) {
                 #if DEBUG
-                print("playurl selected dash fallback id=\(first["id"].intValue) url=\(baseURL.prefix(120))")
+                print("playurl selected dash fallback id=\(first["id"].intValue) codecid=\(first["codecid"].intValue) url=\(baseURL.prefix(120))")
                 #endif
                 return PlayInfo(url: url)
             }

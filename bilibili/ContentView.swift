@@ -450,12 +450,10 @@ struct VideoFeedCard: View {
 
 struct VideoDetailView: View {
     let videoItem: VideoItem
-    @State private var player: AVPlayer?
-    @State private var isPresentingPlayer = false
+    @State private var playerURL: URL?
     @State private var isResolving = false
     @State private var playError: String?
     private let playerService = BilibiliPlayerService()
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         ScrollView {
@@ -534,17 +532,9 @@ struct VideoDetailView: View {
             }
             .padding()
         }
-        .sheet(isPresented: $isPresentingPlayer, onDismiss: {
-            player?.pause()
-        }) {
-            if let player {
-                VideoPlayer(player: player)
-                    .onAppear { player.play() }
-                    .ignoresSafeArea()
-            } else {
-                ProgressView()
-                    .padding()
-            }
+        .fullScreenCover(item: $playerURL) { url in
+            PlayerWindowView(url: url)
+                .ignoresSafeArea()
         }
     }
 
@@ -554,8 +544,7 @@ struct VideoDetailView: View {
             playError = nil
             do {
                 let info = try await playerService.fetchPlayURL(bvid: videoItem.id, cid: videoItem.cid)
-
-                openWindow(id: "PlayerWindow", value: info.url.absoluteString)
+                playerURL = info.url
             } catch {
                 #if DEBUG
                 print("playback failed for \(videoItem.id): \(error)")
@@ -573,6 +562,10 @@ struct VideoDetailView: View {
             isResolving = false
         }
     }
+}
+
+extension URL: Identifiable {
+    public var id: String { absoluteString }
 }
 
 private func formatDuration(_ seconds: Int) -> String {
