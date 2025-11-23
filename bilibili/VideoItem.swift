@@ -8,6 +8,7 @@ struct VideoItem: Identifiable, Decodable, Hashable {
     let authorName: String
     let viewCount: Int
     let duration: Int // 单位：秒
+    let cid: Int?
 
     enum CodingKeys: String, CodingKey {
         case id = "bvid"
@@ -16,6 +17,7 @@ struct VideoItem: Identifiable, Decodable, Hashable {
         case owner
         case stat
         case duration
+        case cid
     }
 
     enum OwnerKeys: String, CodingKey {
@@ -24,22 +26,6 @@ struct VideoItem: Identifiable, Decodable, Hashable {
 
     enum StatKeys: String, CodingKey {
         case view
-    }
-
-    init(
-        id: String,
-        title: String,
-        coverImageURL: URL,
-        authorName: String,
-        viewCount: Int,
-        duration: Int
-    ) {
-        self.id = id
-        self.title = title
-        self.coverImageURL = coverImageURL
-        self.authorName = authorName
-        self.viewCount = viewCount
-        self.duration = duration
     }
 
     init(from decoder: Decoder) throws {
@@ -56,6 +42,25 @@ struct VideoItem: Identifiable, Decodable, Hashable {
         viewCount = try statContainer.decodeIfPresent(Int.self, forKey: .view) ?? 0
 
         duration = try container.decodeIfPresent(Int.self, forKey: .duration) ?? 0
+        cid = try container.decodeIfPresent(Int.self, forKey: .cid)
+    }
+
+    init(
+        id: String,
+        title: String,
+        coverImageURL: URL,
+        authorName: String,
+        viewCount: Int,
+        duration: Int,
+        cid: Int?
+    ) {
+        self.id = id
+        self.title = title
+        self.coverImageURL = coverImageURL
+        self.authorName = authorName
+        self.viewCount = viewCount
+        self.duration = duration
+        self.cid = cid
     }
 }
 
@@ -68,7 +73,8 @@ extension VideoItem {
             coverImageURL: URL(string: "https://i0.hdslb.com/bfs/archive/placeholder.jpg")!,
             authorName: author,
             viewCount: views,
-            duration: duration
+            duration: duration,
+            cid: 0
         )
     }
 }

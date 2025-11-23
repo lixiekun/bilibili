@@ -6,10 +6,15 @@
 //
 
 import SwiftUI
+import AVKit
 
 @MainActor
 struct ContentView: View {
     @StateObject private var viewModel: RecommendationViewModel
+    @StateObject private var followViewModel = FollowFeedViewModel()
+    @StateObject private var loginViewModel = QRLoginViewModel()
+    @State private var isShowingLogin = false
+    @State private var selectedTab: Tab = .recommend
     private let autoLoad: Bool
 
     @MainActor
@@ -21,53 +26,169 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if viewModel.isLoading {
-                    ProgressView("正在加载推荐…")
+                Picker("", selection: $selectedTab) {
+                    Text("推荐").tag(Tab.recommend)
+                    Text("关注").tag(Tab.follow)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+
+                if activeViewModel.isLoading && activeViewModel.videoItems.isEmpty {
+                    ProgressView("正在加载中…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let errorMessage = viewModel.errorMessage {
+                } else if let errorMessage = activeViewModel.errorMessage {
                     VStack(spacing: 12) {
                         Text("错误: \(errorMessage)")
                             .foregroundColor(.red)
                         Button("重试") {
-                            viewModel.fetchRecommendations()
+                            reload()
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if viewModel.videoItems.isEmpty {
-                    Text("暂无推荐内容")
+                } else if activeViewModel.videoItems.isEmpty {
+                    Text("暂无内容")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollView {
-                        let columns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 4)
-                        LazyVGrid(columns: columns, spacing: 20) {
-                            ForEach(viewModel.videoItems) { item in
-                                NavigationLink(value: item) {
-                                    VideoGridCard(videoItem: item)
+                    contentView
+                        .navigationTitle(selectedTab == .recommend ? "首页推荐" : "关注动态")
+                        .toolbar {
+                            Button("刷新") {
+                                reload()
+                            }
+                            .disabled(viewModel.isLoading)
+                            if let profile = loginViewModel.userProfile {
+                                AsyncImage(url: profile.face) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .scaledToFill()
+                                    default:
+                                        Image(systemName: "person.crop.circle")
+                                    }
                                 }
-                                .buttonStyle(.plain)
+                                .frame(width: 28, height: 28)
+                                .clipShape(Circle())
+                                .overlay(Circle().stroke(Color.white.opacity(0.2)))
+                                .accessibilityLabel(Text(profile.uname))
+                            } else {
+                                Button("扫码登录") {
+                                    isShowingLogin = true
+                                    loginViewModel.startLogin()
+                                }
                             }
                         }
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 24)
-                    }
-                    .navigationTitle("首页推荐")
-                    .toolbar {
-                        Button("刷新") {
-                            viewModel.fetchRecommendations()
-                        }
-                    }
                 }
             }
             .navigationDestination(for: VideoItem.self) { item in
                 VideoDetailView(videoItem: item)
                     .navigationTitle(item.title)
             }
+            .sheet(isPresented: $isShowingLogin, onDismiss: {
+                loginViewModel.cancel()
+            }) {
+                QRLoginView(viewModel: loginViewModel)
+                    .presentationDetents([.fraction(0.5), .medium, .large])
+            }
         }
         .task {
             if autoLoad {
-                viewModel.fetchRecommendations()
+                viewModel.refresh()
             }
         }
+        .onReceive(loginViewModel.$state) { state in
+            if case .confirmed = state {
+                isShowingLogin = false
+                viewModel.refresh()
+            }
+        }
+    }
+
+    private var activeViewModel: any FeedProviding {
+        switch selectedTab {
+        case .recommend:
+            return viewModel
+        case .follow:
+            return followViewModel
+        }
+    }
+
+    @ViewBuilder
+    private var contentView: some View {
+        switch selectedTab {
+        case .recommend:
+            ScrollView {
+                let columns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 4)
+                LazyVGrid(columns: columns, spacing: 20) {
+                    ForEach(viewModel.videoItems) { item in
+                        NavigationLink(value: item) {
+                            VideoGridCard(videoItem: item)
+                        }
+                        .buttonStyle(.plain)
+                        .onAppear {
+                            if item == viewModel.videoItems.last && viewModel.canLoadMore {
+                                viewModel.fetchRecommendations()
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 24)
+
+                if viewModel.isLoading {
+                    ProgressView("加载中…")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                } else if !viewModel.canLoadMore {
+                    Text("没有更多了")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+            }
+        case .follow:
+            ScrollView {
+                if let msg = followViewModel.errorMessage {
+                    Text(msg)
+                        .foregroundColor(.red)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 24)
+                }
+
+                let columns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 4)
+                LazyVGrid(columns: columns, spacing: 20) {
+                    ForEach(followViewModel.videoItems) { item in
+                        NavigationLink(value: item) {
+                            VideoGridCard(videoItem: item)
+                        }
+                        .buttonStyle(.plain)
+                        .onAppear {
+                            if item == followViewModel.videoItems.last {
+                                followViewModel.fetch()
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 24)
+            }
+        }
+    }
+
+    private func reload() {
+        switch selectedTab {
+        case .recommend:
+            viewModel.refresh()
+        case .follow:
+            followViewModel.fetch()
+        }
+    }
+
+    private enum Tab {
+        case recommend
+        case follow
     }
 }
 
@@ -137,6 +258,115 @@ struct VideoGridCard: View {
     }
 }
 
+struct RecommendHomeView: View {
+    let items: [VideoItem]
+
+    private var hero: VideoItem? { items.first }
+    private var sections: [(title: String, videos: [VideoItem])] {
+        let chunkSize = 8
+        let chunks = Array(items.dropFirst()).chunked(into: chunkSize)
+        let titles = ["热门推荐", "动画精选", "科技科普", "音乐·舞蹈", "游戏实况", "生活Vlog"]
+        return chunks.enumerated().map { idx, chunk in
+            (titles[idx % titles.count], Array(chunk))
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 32) {
+                if let hero {
+                    HeroView(item: hero)
+                }
+
+                ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                    SectionHeader(title: section.title)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: 18) {
+                            ForEach(section.videos) { item in
+                                NavigationLink(value: item) {
+                                    VideoGridCard(videoItem: item)
+                                        .frame(width: 320)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 24)
+                    }
+                }
+            }
+            .padding(.vertical, 24)
+        }
+    }
+}
+
+private struct HeroView: View {
+    let item: VideoItem
+
+    var body: some View {
+        NavigationLink(value: item) {
+            HStack(spacing: 24) {
+                AsyncImage(url: item.coverImageURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(16/9, contentMode: .fill)
+                            .frame(width: 520, height: 290)
+                            .clipped()
+                            .cornerRadius(20)
+                    case .failure:
+                        Image(systemName: "photo")
+                            .frame(width: 520, height: 290)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(20)
+                    case .empty:
+                        ProgressView()
+                            .frame(width: 520, height: 290)
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(item.title)
+                        .font(.title.weight(.bold))
+                        .lineLimit(2)
+                    Text("UP: \(item.authorName)")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    Text("\(item.viewCount.formatted(.number.notation(.compactName))) 次观看 · \(formatDuration(item.duration))")
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        DetailActionButton(title: "播放", systemImage: "play.fill")
+                        DetailActionButton(title: "收藏", systemImage: "star")
+                    }
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct SectionHeader: View {
+    let title: String
+    var body: some View {
+        Text(title)
+            .font(.title3.weight(.semibold))
+            .padding(.horizontal, 24)
+    }
+}
+
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return [] }
+        return stride(from: 0, to: count, by: size).map { start in
+            Array(self[start..<Swift.min(start + size, count)])
+        }
+    }
+}
+
 struct VideoFeedCard: View {
     let videoItem: VideoItem
 
@@ -188,6 +418,11 @@ struct VideoFeedCard: View {
 
 struct VideoDetailView: View {
     let videoItem: VideoItem
+    @State private var player: AVPlayer?
+    @State private var isPresentingPlayer = false
+    @State private var isResolving = false
+    @State private var playError: String?
+    private let playerService = BilibiliPlayerService()
 
     var body: some View {
         ScrollView {
@@ -207,7 +442,12 @@ struct VideoDetailView: View {
                         .foregroundStyle(.secondary)
 
                         HStack(spacing: 16) {
-                            DetailActionButton(title: "播放", systemImage: "play.fill")
+                            Button {
+                                startPlayback()
+                            } label: {
+                                DetailActionButtonContent(title: "播放", systemImage: "play.fill")
+                            }
+                            .buttonStyle(.plain)
                             DetailActionButton(title: "点赞", systemImage: "hand.thumbsup")
                             DetailActionButton(title: "收藏", systemImage: "star")
                             DetailActionButton(title: "不喜欢", systemImage: "hand.thumbsdown")
@@ -242,6 +482,13 @@ struct VideoDetailView: View {
                 Text("这里展示视频简介、标签和更多信息。")
                     .foregroundStyle(.secondary)
 
+                if let playError {
+                    Text(playError)
+                        .foregroundColor(.red)
+                } else if isResolving {
+                    ProgressView("正在解析播放地址…")
+                }
+
                 Text("相关推荐")
                     .font(.headline)
 
@@ -253,6 +500,53 @@ struct VideoDetailView: View {
                 }
             }
             .padding()
+        }
+        .sheet(isPresented: $isPresentingPlayer, onDismiss: {
+            player?.pause()
+        }) {
+            if let player {
+                VideoPlayer(player: player)
+                    .onAppear { player.play() }
+                    .ignoresSafeArea()
+            } else {
+                ProgressView()
+                    .padding()
+            }
+        }
+    }
+
+    private func startPlayback() {
+        Task {
+            isResolving = true
+            playError = nil
+            do {
+                let info = try await playerService.fetchPlayURL(bvid: videoItem.id, cid: videoItem.cid)
+
+                var headers: [String: String] = [
+                    "User-Agent": "Mozilla/5.0 (VisionOS) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+                    "Referer": "https://www.bilibili.com"
+                ]
+                if let cookies = HTTPCookieStorage.shared.cookies, !cookies.isEmpty {
+                    let cookieString = cookies.compactMap { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+                    headers["Cookie"] = cookieString
+                }
+
+                let asset = AVURLAsset(url: info.url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+                let item = AVPlayerItem(asset: asset)
+                player = AVPlayer(playerItem: item)
+                isPresentingPlayer = true
+            } catch {
+                if case BilibiliPlayerService.PlayerError.apiError(let code, let message) = error {
+                    playError = "无法播放：\(message) (code \(code))"
+                } else if case BilibiliPlayerService.PlayerError.missingCID = error {
+                    playError = "无法播放：缺少 CID"
+                } else if case BilibiliPlayerService.PlayerError.noPlayableURL = error {
+                    playError = "无法播放：未返回可用链接"
+                } else {
+                    playError = "无法播放：\(error.localizedDescription)"
+                }
+            }
+            isResolving = false
         }
     }
 }
@@ -279,16 +573,95 @@ private struct DetailActionButton: View {
     var body: some View {
         Button {
         } label: {
-            VStack(spacing: 6) {
-                Image(systemName: systemImage)
-                    .font(.title2)
-                Text(title)
-                    .font(.footnote)
-            }
-            .frame(width: 90, height: 70)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            DetailActionButtonContent(title: title, systemImage: systemImage)
         }
         .buttonStyle(.plain)
+    }
+}
+
+struct DetailActionButtonContent: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.title2)
+            Text(title)
+                .font(.footnote)
+        }
+        .frame(width: 90, height: 70)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+struct QRLoginView: View {
+    @ObservedObject var viewModel: QRLoginViewModel
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Text("扫码登录 Bilibili")
+                .font(.title2.weight(.semibold))
+
+            Group {
+                switch viewModel.state {
+                case .idle, .generating:
+                    ProgressView("正在生成二维码…")
+                        .frame(height: 240)
+                case .scanning(let url, _):
+                    VStack(spacing: 12) {
+                        if let qr = viewModel.qrImage {
+                            qr
+                                .interpolation(.none)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 240, height: 240)
+                                .cornerRadius(12)
+                        } else {
+                            ProgressView()
+                                .frame(width: 240, height: 240)
+                        }
+                        Text(url.absoluteString)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                case .confirmed:
+                    Label("登录成功", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.title3.weight(.semibold))
+                case .expired:
+                    Label("二维码已失效，请刷新", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.title3.weight(.semibold))
+                case .failed(let message):
+                    Label(message, systemImage: "xmark.octagon.fill")
+                        .foregroundStyle(.red)
+                        .font(.body)
+                        .multilineTextAlignment(.center)
+                }
+            }
+
+            HStack(spacing: 16) {
+                Button("刷新二维码") {
+                    viewModel.startLogin()
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("取消") {
+                    viewModel.cancel()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding()
+        .frame(maxWidth: 420)
+        .onAppear {
+            if case .idle = viewModel.state {
+                viewModel.startLogin()
+            }
+        }
     }
 }
 
