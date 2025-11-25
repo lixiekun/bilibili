@@ -12,10 +12,11 @@ import AVKit
 struct ContentView: View {
     @StateObject private var viewModel: RecommendationViewModel
     @StateObject private var followViewModel = FollowFeedViewModel()
+    @StateObject private var hotViewModel = HotFeedViewModel()
+    @StateObject private var rankingViewModel = RankingViewModel()
     @StateObject private var loginViewModel = QRLoginViewModel()
     @State private var isShowingLogin = false
     @State private var selectedTab: Tab = .recommend
-    @Environment(\.openWindow) private var openWindow
     private let autoLoad: Bool
 
     @MainActor
@@ -26,91 +27,37 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                Picker("", selection: $selectedTab) {
-                    Text("推荐").tag(Tab.recommend)
-                    Text("关注").tag(Tab.follow)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-
-                if activeViewModel.isLoading && activeViewModel.videoItems.isEmpty {
-                    ProgressView("正在加载中…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let errorMessage = activeViewModel.errorMessage {
-                    VStack(spacing: 12) {
-                        Text("错误: \(errorMessage)")
-                            .foregroundColor(.red)
-                        Button("重试") {
-                            reload()
+            TabView(selection: $selectedTab) {
+                mainContent
+                    .tag(Tab.recommend)
+                    .tabItem { Label("推荐", systemImage: "house.fill") }
+                mainContent
+                    .tag(Tab.follow)
+                    .tabItem { Label("关注", systemImage: "person.2.fill") }
+                mainContent
+                    .tag(Tab.hot)
+                    .tabItem { Label("热门", systemImage: "flame.fill") }
+                mainContent
+                    .tag(Tab.ranking)
+                    .tabItem { Label("排行榜", systemImage: "list.number") }
+                mainContent
+                    .tag(Tab.profile)
+                    .tabItem {
+                        if let face = loginViewModel.userProfile?.face {
+                            AsyncImage(url: face) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image.resizable()
+                                default:
+                                    Image(systemName: "person.circle")
+                                }
+                            }
+                            .frame(width: 22, height: 22)
+                            .clipShape(Circle())
+                        } else {
+                            Label("我的", systemImage: "person.circle")
                         }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if activeViewModel.videoItems.isEmpty {
-                    contentView
-                        .navigationTitle(selectedTab == .recommend ? "首页推荐" : "关注动态")
-                        .toolbar {
-                            Button("刷新") {
-                                reload()
-                            }
-//                            .disabled(viewModel.isLoading)
-                            if let profile = loginViewModel.userProfile {
-                                AsyncImage(url: profile.face) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .scaledToFill()
-                                    default:
-                                        Image(systemName: "person.crop.circle")
-                                    }
-                                }
-                                .frame(width: 28, height: 28)
-                                .clipShape(Circle())
-                                .overlay(Circle().stroke(Color.white.opacity(0.2)))
-                                .accessibilityLabel(Text(profile.uname))
-                            } else {
-                                Button("扫码登录") {
-                                    isShowingLogin = true
-                                    loginViewModel.startLogin()
-                                }
-                            }
-                        }
-                    Text("暂无内容")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    
-                } else {
-                    contentView
-                        .navigationTitle(selectedTab == .recommend ? "首页推荐" : "关注动态")
-                        .toolbar {
-                            Button("刷新") {
-                                reload()
-                            }
-//                            .disabled(viewModel.isLoading)
-                            if let profile = loginViewModel.userProfile {
-                                AsyncImage(url: profile.face) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .scaledToFill()
-                                    default:
-                                        Image(systemName: "person.crop.circle")
-                                    }
-                                }
-                                .frame(width: 28, height: 28)
-                                .clipShape(Circle())
-                                .overlay(Circle().stroke(Color.white.opacity(0.2)))
-                                .accessibilityLabel(Text(profile.uname))
-                            } else {
-                                Button("扫码登录") {
-                                    isShowingLogin = true
-                                    loginViewModel.startLogin()
-                                }
-                            }
-                        }
-                }
             }
             .navigationDestination(for: VideoItem.self) { item in
                 VideoDetailView(videoItem: item)
@@ -125,13 +72,26 @@ struct ContentView: View {
         }
         .task {
             if autoLoad {
-                viewModel.refresh()
+                CookieManager.restore()
+                await loginViewModel.restoreFromSavedCookies()
+                reload()
             }
         }
         .onReceive(loginViewModel.$state) { state in
             if case .confirmed = state {
                 isShowingLogin = false
-                viewModel.refresh()
+                reload()
+            }
+        }
+        .onChange(of: selectedTab) { newValue in
+            if newValue == .follow,
+               loginViewModel.userProfile != nil,
+               followViewModel.videoItems.isEmpty {
+                followViewModel.refresh()
+            } else if newValue == .hot, hotViewModel.videoItems.isEmpty {
+                hotViewModel.fetch()
+            } else if newValue == .ranking, rankingViewModel.videoItems.isEmpty {
+                rankingViewModel.fetch()
             }
         }
     }
@@ -142,7 +102,50 @@ struct ContentView: View {
             return viewModel
         case .follow:
             return followViewModel
+        case .hot:
+            return hotViewModel
+        case .ranking:
+            return rankingViewModel
+        case .profile:
+            return viewModel
         }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(tabTitle)
+                    .font(.largeTitle.bold())
+                Spacer()
+                Button {
+                    reload()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(activeViewModel.isLoading)
+            }
+
+            if activeViewModel.isLoading && activeViewModel.videoItems.isEmpty {
+                ProgressView("正在加载中…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let errorMessage = activeViewModel.errorMessage {
+                VStack(spacing: 12) {
+                    Text("错误: \(errorMessage)")
+                        .foregroundColor(.red)
+                    Button("重试") { reload() }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if activeViewModel.videoItems.isEmpty {
+                Text("暂无内容")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                contentView
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
     }
 
     @ViewBuilder
@@ -205,22 +208,113 @@ struct ContentView: View {
                 .padding(.horizontal, 24)
                 .padding(.vertical, 24)
             }
+        case .hot:
+            ScrollView {
+                let columns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 4)
+                LazyVGrid(columns: columns, spacing: 20) {
+                    ForEach(hotViewModel.videoItems) { item in
+                        NavigationLink(value: item) {
+                            VideoGridCard(videoItem: item)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 24)
+
+                if hotViewModel.isLoading {
+                    ProgressView("加载中…")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+            }
+        case .ranking:
+            ScrollView {
+                let columns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 4)
+                LazyVGrid(columns: columns, spacing: 20) {
+                    ForEach(rankingViewModel.videoItems) { item in
+                        NavigationLink(value: item) {
+                            VideoGridCard(videoItem: item)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 24)
+
+                if rankingViewModel.isLoading {
+                    ProgressView("加载中…")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+            }
+        case .profile:
+            VStack(spacing: 16) {
+                if let profile = loginViewModel.userProfile {
+                    AsyncImage(url: profile.face) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        default:
+                            Image(systemName: "person.crop.circle")
+                        }
+                    }
+                    .frame(width: 80, height: 80)
+                    .clipShape(Circle())
+                    Text(profile.uname).font(.title2.bold())
+                    Button("退出登录") {
+                        HTTPCookieStorage.shared.cookies?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
+                        CookieManager.clear()
+                        loginViewModel.userProfile = nil
+                        followViewModel.videoItems = []
+                        followViewModel.errorMessage = nil
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Text("未登录")
+                    Button("扫码登录") {
+                        isShowingLogin = true
+                        loginViewModel.startLogin()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding()
         }
     }
 
     private func reload() {
-        print("11111")
         switch selectedTab {
         case .recommend:
             viewModel.refresh()
         case .follow:
-            followViewModel.fetch()
+            followViewModel.refresh()
+        case .hot:
+            hotViewModel.fetch()
+        case .ranking:
+            rankingViewModel.fetch()
+        case .profile:
+            break
         }
     }
 
     private enum Tab {
         case recommend
         case follow
+        case hot
+        case ranking
+        case profile
+    }
+
+    private var tabTitle: String {
+        switch selectedTab {
+        case .recommend: return "首页推荐"
+        case .follow: return "关注动态"
+        case .hot: return "热门"
+        case .ranking: return "排行榜"
+        case .profile: return "我的"
+        }
     }
 }
 

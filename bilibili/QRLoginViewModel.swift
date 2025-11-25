@@ -96,6 +96,7 @@ final class QRLoginViewModel: ObservableObject {
                     switch decoded.data.code {
                     case 0:
                         state = .confirmed
+                        CookieManager.save()
                         await fetchUserProfile()
                         pollTask?.cancel()
                         return
@@ -112,6 +113,14 @@ final class QRLoginViewModel: ObservableObject {
                     return
                 }
             }
+        }
+    }
+
+    /// 尝试从已保存的 Cookie 恢复登录态并拉取用户信息
+    func restoreFromSavedCookies() async {
+        let restored = CookieManager.restore()
+        if restored {
+            await fetchUserProfile()
         }
     }
 
