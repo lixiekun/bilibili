@@ -7,29 +7,27 @@ final class FollowFeedViewModel: ObservableObject {
     @Published var videoItems: [VideoItem] = []
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
+    private var seenIDs = Set<String>()
 
     // 使用 polymer 动态接口，需登录 Cookie 才有关注流
     private let feedBaseURL = URL(string: "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all")!
-    private let session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.httpCookieStorage = HTTPCookieStorage.shared
-        config.httpShouldSetCookies = true
-        config.httpShouldUsePipelining = true
-        return URLSession(configuration: config)
-    }()
     private var page: Int = 1
     private var hasMore: Bool = true
+    private var offset: String?
 
     func refresh() {
         guard !isLoading else { return }
         page = 1
         hasMore = true
+        offset = nil
         videoItems.removeAll()
         errorMessage = nil
+        seenIDs.removeAll()
         fetch()
     }
 
     func fetch() {
+        // 分页规则：page + offset（后端返回）双保险。hasMore 控制是否继续，seenIDs 去重。
         guard !isLoading, hasMore else { return }
         isLoading = true
         errorMessage = nil
@@ -43,6 +41,10 @@ final class FollowFeedViewModel: ObservableObject {
                     URLQueryItem(name: "platform", value: "web"),
                     URLQueryItem(name: "timezone_offset", value: "28800")
                 ]
+                // offset 由后端返回，用于继续向后翻页；为空表示第一页
+                if let offset {
+                    components.queryItems?.append(URLQueryItem(name: "offset", value: offset))
+                }
                 guard let url = components.url else { return }
 
                 let headers: HTTPHeaders = [
@@ -98,13 +100,29 @@ final class FollowFeedViewModel: ObservableObject {
                     return nil
                 }
 
-                if videos.isEmpty {
-                    errorMessage = "关注流为空或解析失败"
+                let unique = videos.filter { seenIDs.insert($0.id).inserted }
+                let nextHasMore = json["data"]["has_more"].boolValue
+                let nextOffset = json["data"]["offset"].string
+
+                // 若本页去重后为空且后端还有分页，使用 offset 继续翻页，避免卡在“加载中”
+                if unique.isEmpty {
+                    if nextHasMore, nextOffset != offset {
+                        offset = nextOffset
+                        page += 1
+                        isLoading = false
+                        fetch()
+                        return
+                    } else {
+                        hasMore = false
+                        isLoading = false
+                        return
+                    }
                 }
 
-                videoItems.append(contentsOf: videos)
+                videoItems.append(contentsOf: unique)
                 page += 1
-                hasMore = json["data"]["has_more"].boolValue && !videos.isEmpty
+                hasMore = nextHasMore
+                offset = nextOffset
             } catch {
                 errorMessage = "获取关注动态失败：\(error.localizedDescription)"
             }
