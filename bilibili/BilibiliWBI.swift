@@ -5,19 +5,25 @@ import CryptoKit
 /// 生成 B 站 WBI 请求签名的辅助工具。
 struct BilibiliWBI {
     private static let mixinKeyTable: [Int] = [46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 52, 20, 34, 44, 38]
-
-    private var mixinKey: String?
+    
+    // 改为静态变量，全局共享缓存
+    private static var cachedMixinKey: String?
+    private static var lastFetchTime: TimeInterval = 0
 
     mutating func ensureKey() async throws {
-        if mixinKey != nil { return }
+        // 如果已有缓存且未过期（比如 1 小时），直接使用
+        if let key = Self.cachedMixinKey, Date().timeIntervalSince1970 - Self.lastFetchTime < 3600 {
+            return
+        }
         let key = try await fetchMixinKey()
-        mixinKey = key
+        Self.cachedMixinKey = key
+        Self.lastFetchTime = Date().timeIntervalSince1970
     }
 
     mutating func sign(params: [String: String]) async throws -> [String: String] {
         try await ensureKey()
-        guard let mixinKey else { return params }
-
+        guard let mixinKey = Self.cachedMixinKey else { return params }
+        
         let wts = Int(Date().timeIntervalSince1970)
         var filtered = params.filter { key, _ in key != "w_rid" && key != "wts" }
         filtered["wts"] = "\(wts)"

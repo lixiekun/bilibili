@@ -35,7 +35,7 @@ struct VideoItem: Identifiable, Hashable {
         let title = json["title"].string ?? ""
         let coverString = json["pic"].string ?? json["cover"].string
         let authorName = json["owner"]["name"].string ?? json["module_author"]["name"].string ?? "未知UP"
-        let viewCount = json["stat"]["view"].int ?? json["stat"]["play"].int ?? 0
+        let viewCount = json["stat"]["view"].int ?? json["stat"]["play"].int ?? json["play"].int ?? 0
         let duration = json["duration"].int ?? VideoItem.parseDuration(text: json["durationText"].string ?? json["duration_text"].string)
         let cid = json["cid"].int
 

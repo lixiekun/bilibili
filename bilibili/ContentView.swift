@@ -14,6 +14,7 @@ struct ContentView: View {
     @StateObject private var followViewModel = FollowFeedViewModel()
     @StateObject private var hotViewModel = HotFeedViewModel()
     @StateObject private var rankingViewModel = RankingViewModel()
+    @StateObject private var historyViewModel = HistoryViewModel() // 历史记录 VM
     @StateObject private var loginViewModel = QRLoginViewModel()
     @State private var isShowingLogin = false
     @State private var selectedTab: Tab = .recommend
@@ -26,61 +27,65 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            TabView(selection: $selectedTab) {
-                mainContent
-                    .tag(Tab.recommend)
-                    .tabItem { Label("推荐", systemImage: "house.fill") }
-                mainContent
-                    .tag(Tab.follow)
-                    .tabItem { Label("关注", systemImage: "person.2.fill") }
-                mainContent
-                    .tag(Tab.hot)
-                    .tabItem { Label("热门", systemImage: "flame.fill") }
-                mainContent
-                    .tag(Tab.ranking)
-                    .tabItem { Label("排行榜", systemImage: "list.number") }
-                mainContent
-                    .tag(Tab.profile)
-                    .tabItem {
-                        if let face = loginViewModel.userProfile?.face {
-                            AsyncImage(url: face) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image.resizable()
-                                default:
-                                    Image(systemName: "person.circle")
-                                }
+        TabView(selection: $selectedTab) {
+            tabRootView(for: .recommend)
+                .tag(Tab.recommend)
+                .tabItem { Label("推荐", systemImage: "house.fill") }
+
+            tabRootView(for: .follow)
+                .tag(Tab.follow)
+                .tabItem { Label("关注", systemImage: "person.2.fill") }
+
+            tabRootView(for: .hot)
+                .tag(Tab.hot)
+                .tabItem { Label("热门", systemImage: "flame.fill") }
+
+            tabRootView(for: .ranking)
+                .tag(Tab.ranking)
+                .tabItem { Label("排行榜", systemImage: "list.number") }
+
+            tabRootView(for: .profile)
+                .tag(Tab.profile)
+                .tabItem {
+                    if let face = loginViewModel.userProfile?.face {
+                        AsyncImage(url: face) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image.resizable()
+                            default:
+                                Image(systemName: "person.circle")
                             }
-                            .frame(width: 22, height: 22)
-                            .clipShape(Circle())
-                        } else {
-                            Label("我的", systemImage: "person.circle")
                         }
+                        .frame(width: 22, height: 22)
+                        .clipShape(Circle())
+                    } else {
+                        Label("我的", systemImage: "person.circle")
                     }
-            }
-            .navigationDestination(for: VideoItem.self) { item in
-                VideoDetailView(videoItem: item)
-                    .navigationTitle(item.title)
-            }
-            .sheet(isPresented: $isShowingLogin, onDismiss: {
-                loginViewModel.cancel()
-            }) {
-                QRLoginView(viewModel: loginViewModel)
-                    .presentationDetents([.fraction(0.5), .medium, .large])
-            }
+                }
+        }
+        .sheet(isPresented: $isShowingLogin, onDismiss: {
+            loginViewModel.cancel()
+        }) {
+            QRLoginView(viewModel: loginViewModel)
+                .presentationDetents([.fraction(0.5), .medium, .large])
         }
         .task {
             if autoLoad {
                 CookieManager.restore()
                 await loginViewModel.restoreFromSavedCookies()
-                reload()
+                reload(for: selectedTab)
+            }
+            
+            // 预热 WBI 签名 Key，避免首次播放卡顿
+            Task.detached {
+                var signer = BilibiliWBI()
+                try? await signer.ensureKey()
             }
         }
         .onReceive(loginViewModel.$state) { state in
             if case .confirmed = state {
                 isShowingLogin = false
-                reload()
+                reload(for: selectedTab)
             }
         }
         .onChange(of: selectedTab) { newValue in
@@ -95,9 +100,20 @@ struct ContentView: View {
             }
         }
     }
+    
+    @ViewBuilder
+    private func tabRootView(for tab: Tab) -> some View {
+        NavigationStack {
+            mainContent(for: tab)
+                .navigationDestination(for: VideoItem.self) { item in
+                    VideoDetailView(videoItem: item)
+                        .navigationTitle(item.title)
+                }
+        }
+    }
 
-    private var activeViewModel: any FeedProviding {
-        switch selectedTab {
+    private func viewModel(for tab: Tab) -> any FeedProviding {
+        switch tab {
         case .recommend:
             return viewModel
         case .follow:
@@ -112,14 +128,16 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private var mainContent: some View {
+    private func mainContent(for tab: Tab) -> some View {
+        let activeViewModel = viewModel(for: tab)
+        
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(tabTitle)
+                Text(title(for: tab))
                     .font(.largeTitle.bold())
                 Spacer()
                 Button {
-                    reload()
+                    reload(for: tab)
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -134,14 +152,14 @@ struct ContentView: View {
                 VStack(spacing: 12) {
                     Text("错误: \(errorMessage)")
                         .foregroundColor(.red)
-                    Button("重试") { reload() }
+                    Button("重试") { reload(for: tab) }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if activeViewModel.videoItems.isEmpty {
                 Text("暂无内容")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                contentView
+                contentView(for: tab)
             }
         }
         .padding(.horizontal, 24)
@@ -149,8 +167,8 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private var contentView: some View {
-        switch selectedTab {
+    private func contentView(for tab: Tab) -> some View {
+        switch tab {
         case .recommend:
             ScrollView {
                 let columns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 4)
@@ -161,7 +179,11 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
                         .onAppear {
-                            if item == viewModel.videoItems.last && viewModel.canLoadMore {
+                            // 预加载：当显示到倒数第4个视频时，就开始加载下一页
+                            let thresholdIndex = viewModel.videoItems.index(viewModel.videoItems.endIndex, offsetBy: -4, limitedBy: 0) ?? 0
+                            if let currentIndex = viewModel.videoItems.firstIndex(where: { $0.id == item.id }),
+                               currentIndex >= thresholdIndex,
+                               viewModel.canLoadMore {
                                 viewModel.fetchRecommendations()
                             }
                         }
@@ -181,6 +203,7 @@ struct ContentView: View {
                         .padding(.vertical, 12)
                 }
             }
+            .refreshable { reload(for: tab) }
         case .follow:
             ScrollView {
                 if let msg = followViewModel.errorMessage {
@@ -207,7 +230,14 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.vertical, 24)
+
+                if followViewModel.isLoading {
+                    ProgressView("加载中…")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
             }
+            .refreshable { reload(for: tab) }
         case .hot:
             ScrollView {
                 let columns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 4)
@@ -228,6 +258,7 @@ struct ContentView: View {
                         .padding(.vertical, 12)
                 }
             }
+            .refreshable { reload(for: tab) }
         case .ranking:
             ScrollView {
                 let columns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 4)
@@ -248,44 +279,107 @@ struct ContentView: View {
                         .padding(.vertical, 12)
                 }
             }
+            .refreshable { reload(for: tab) }
         case .profile:
-            VStack(spacing: 16) {
-                if let profile = loginViewModel.userProfile {
-                    AsyncImage(url: profile.face) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        default:
-                            Image(systemName: "person.crop.circle")
+            ScrollView {
+                VStack(spacing: 24) {
+                    if let profile = loginViewModel.userProfile {
+                        // 用户信息头
+                        VStack(spacing: 16) {
+                            AsyncImage(url: profile.face) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image.resizable().scaledToFill()
+                                default:
+                                    Image(systemName: "person.crop.circle")
+                                }
+                            }
+                            .frame(width: 80, height: 80)
+                            .clipShape(Circle())
+                            Text(profile.uname).font(.title2.bold())
+                            Button("退出登录") {
+                                HTTPCookieStorage.shared.cookies?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
+                                CookieManager.clear()
+                                loginViewModel.userProfile = nil
+                                followViewModel.videoItems = []
+                                followViewModel.errorMessage = nil
+                                historyViewModel.items = [] // 清空历史
+                            }
+                            .buttonStyle(.bordered)
                         }
+                        .padding(.bottom, 24)
+                        
+                        // 历史记录列表
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack {
+                                Text("历史记录")
+                                    .font(.title2.bold())
+                                Spacer()
+                                Button {
+                                    historyViewModel.fetch()
+                                } label: {
+                                    Image(systemName: "arrow.clockwise")
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.horizontal, 24)
+                            
+                            if historyViewModel.isLoading {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                            } else if let error = historyViewModel.errorMessage {
+                                Text(error)
+                                    .foregroundColor(.red)
+                                    .padding(.horizontal, 24)
+                            } else if historyViewModel.items.isEmpty {
+                                Text("暂无历史记录")
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 24)
+                            } else {
+                                let columns = Array(repeating: GridItem(.flexible(), spacing: 20), count: 4)
+                                LazyVGrid(columns: columns, spacing: 20) {
+                                    ForEach(historyViewModel.items) { item in
+                                        NavigationLink(value: item) {
+                                            VideoGridCard(videoItem: item)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(.horizontal, 24)
+                            }
+                        }
+                    } else {
+                        VStack(spacing: 20) {
+                            Text("未登录")
+                                .font(.title)
+                            Button("扫码登录") {
+                                isShowingLogin = true
+                                loginViewModel.startLogin()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.top, 100)
                     }
-                    .frame(width: 80, height: 80)
-                    .clipShape(Circle())
-                    Text(profile.uname).font(.title2.bold())
-                    Button("退出登录") {
-                        HTTPCookieStorage.shared.cookies?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
-                        CookieManager.clear()
-                        loginViewModel.userProfile = nil
-                        followViewModel.videoItems = []
-                        followViewModel.errorMessage = nil
-                    }
-                    .buttonStyle(.bordered)
-                } else {
-                    Text("未登录")
-                    Button("扫码登录") {
-                        isShowingLogin = true
-                        loginViewModel.startLogin()
-                    }
-                    .buttonStyle(.borderedProminent)
+                }
+                .padding(.vertical, 24)
+            }
+            .refreshable {
+                if loginViewModel.userProfile != nil {
+                    historyViewModel.fetch()
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding()
+            .onAppear {
+                if loginViewModel.userProfile != nil && historyViewModel.items.isEmpty {
+                    historyViewModel.fetch()
+                }
+            }
         }
     }
 
-    private func reload() {
-        switch selectedTab {
+    private func reload(for tab: Tab) {
+        switch tab {
         case .recommend:
             viewModel.refresh()
         case .follow:
@@ -307,8 +401,8 @@ struct ContentView: View {
         case profile
     }
 
-    private var tabTitle: String {
-        switch selectedTab {
+    private func title(for tab: Tab) -> String {
+        switch tab {
         case .recommend: return "首页推荐"
         case .follow: return "关注动态"
         case .hot: return "热门"
@@ -331,56 +425,73 @@ struct VideoGridCard: View {
     let videoItem: VideoItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ZStack(alignment: .bottomLeading) {
+        VStack(alignment: .leading, spacing: 10) {
+            // 封面区域
+            ZStack(alignment: .bottomTrailing) {
                 AsyncImage(url: videoItem.coverImageURL) { phase in
                     switch phase {
                     case .success(let image):
                         image
                             .resizable()
-                            .aspectRatio(16/9, contentMode: .fill)
-                            .frame(height: 150)
-                            .clipped()
-                            .cornerRadius(14)
+                            .aspectRatio(1.778, contentMode: .fill) // 16:9 比例
                     case .failure:
-                        Image(systemName: "photo")
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 150)
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(14)
+                        Color.gray.opacity(0.1)
+                            .overlay(Image(systemName: "photo").foregroundColor(.gray))
+                            .aspectRatio(1.778, contentMode: .fit)
                     case .empty:
-                        ProgressView()
-                            .frame(height: 150)
+                        Color.gray.opacity(0.1)
+                            .aspectRatio(1.778, contentMode: .fit)
                     @unknown default:
                         EmptyView()
                     }
                 }
-
+                .frame(maxWidth: .infinity)
+                .clipped() // 确保内容不会溢出圆角
+                
+                // 时长标签
                 Text(formatDuration(videoItem.duration))
                     .font(.caption2.bold())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.black.opacity(0.65), in: Capsule())
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.ultraThinMaterial) // 使用磨砂玻璃效果
+                    .cornerRadius(4)
+                    .padding(6)
                     .foregroundColor(.white)
-                    .padding(10)
             }
+            .cornerRadius(12) // 封面圆角
 
-            Text(videoItem.title)
-                .font(.headline)
-                .lineLimit(2)
-            Text("UP: \(videoItem.authorName)")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Text("\(videoItem.viewCount.formatted(.number.notation(.compactName))) 次观看")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            // 信息区域
+            VStack(alignment: .leading, spacing: 4) {
+                Text(videoItem.title)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(height: 44, alignment: .topLeading) // 固定两行标题的高度 (大约值，视字体大小调整)
+                    .fixedSize(horizontal: false, vertical: true) // 允许垂直方向根据内容调整，但受限于 frame
+                
+                HStack {
+                    Image(systemName: "play.circle")
+                        .font(.caption)
+                    Text(videoItem.viewCount.formatted(.number.notation(.compactName)))
+                        .font(.caption)
+                    
+                    Spacer()
+                    
+                    Text(videoItem.authorName)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .foregroundColor(.secondary)
+                }
+                .foregroundColor(.secondary)
+                .padding(.top, 4)
+            }
+            .padding(.horizontal, 4)
+            .padding(.bottom, 12)
         }
-        .padding(12)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.06))
-        )
+        .background(Color.primary.opacity(0.05)) // 极其轻微的背景
+        .cornerRadius(16)
+        // 移除 strokeBorder，visionOS 中通常使用 hover effect 和 depth
+        .hoverEffect() // 添加 visionOS 标准悬停效果
     }
 }
 
@@ -436,18 +547,17 @@ private struct HeroView: View {
                     case .success(let image):
                         image
                             .resizable()
-                            .aspectRatio(16/9, contentMode: .fill)
-                            .frame(width: 520, height: 290)
+                            .aspectRatio(1.778, contentMode: .fill) // 16:9
+                            .frame(maxWidth: 520) // 限制最大宽度，高度自动
                             .clipped()
                             .cornerRadius(20)
                     case .failure:
-                        Image(systemName: "photo")
-                            .frame(width: 520, height: 290)
-                            .background(Color.gray.opacity(0.1))
+                        Color.gray.opacity(0.1)
+                            .frame(width: 520, height: 292) // 保持大约 16:9
                             .cornerRadius(20)
                     case .empty:
                         ProgressView()
-                            .frame(width: 520, height: 290)
+                            .frame(width: 520, height: 292)
                     @unknown default:
                         EmptyView()
                     }
@@ -455,21 +565,36 @@ private struct HeroView: View {
 
                 VStack(alignment: .leading, spacing: 12) {
                     Text(item.title)
-                        .font(.title.weight(.bold))
+                        .font(.extraLargeTitle2.bold()) // visionOS 上可以使用更大的字体
                         .lineLimit(2)
-                    Text("UP: \(item.authorName)")
+                    
+                    HStack {
+                         Label(item.authorName, systemImage: "person.circle")
+                         Label("\(item.viewCount.formatted(.number.notation(.compactName))) 观看", systemImage: "eye")
+                    }
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    
+                    Text(formatDuration(item.duration))
                         .font(.headline)
                         .foregroundStyle(.secondary)
-                    Text("\(item.viewCount.formatted(.number.notation(.compactName))) 次观看 · \(formatDuration(item.duration))")
-                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+                        
+                    Spacer()
+                    
                     HStack(spacing: 12) {
                         DetailActionButton(title: "播放", systemImage: "play.fill")
                         DetailActionButton(title: "收藏", systemImage: "star")
                     }
                 }
+                .padding(.vertical, 8)
                 Spacer()
             }
-            .padding(.horizontal, 24)
+            .padding(24) // 增加内边距
+            .background(.regularMaterial) // 给整个 Hero 卡片加个背景
+            .cornerRadius(32)
         }
         .buttonStyle(.plain)
     }
@@ -547,88 +672,143 @@ struct VideoDetailView: View {
     @State private var playerURL: URL?
     @State private var isResolving = false
     @State private var playError: String?
+    @StateObject private var relatedViewModel = RelatedViewModel()
     private let playerService = BilibiliPlayerService()
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                HStack(alignment: .top, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(videoItem.title)
-                            .font(.title.weight(.bold))
-                            .lineLimit(2)
-
-                        HStack(spacing: 16) {
-                            Label(videoItem.authorName, systemImage: "person.circle")
-                            Label(videoItem.viewCount.formatted(.number.notation(.compactName)) + " 次观看", systemImage: "eye")
-                            Label(formatDuration(videoItem.duration), systemImage: "clock")
+            VStack(alignment: .leading, spacing: 32) {
+                // 顶部 Hero 区域：左侧信息 + 右侧封面
+                HStack(alignment: .top, spacing: 32) {
+                    // 左侧：视频信息与操作
+                    VStack(alignment: .leading, spacing: 20) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(videoItem.title)
+                                .font(.extraLargeTitle2.bold())
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true) // 允许标题换行并自适应高度
+                            
+                            HStack(spacing: 16) {
+                                Label(videoItem.authorName, systemImage: "person.circle")
+                                Label("\(videoItem.viewCount.formatted(.number.notation(.compactName))) 观看", systemImage: "eye")
+                                Label(formatDuration(videoItem.duration), systemImage: "clock")
+                            }
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
                         }
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
 
-                        HStack(spacing: 16) {
+                        // 操作按钮组
+                        HStack(spacing: 20) {
                             Button {
                                 startPlayback()
                             } label: {
-                                DetailActionButtonContent(title: "播放", systemImage: "play.fill")
+                                Label("播放", systemImage: "play.fill")
+                                    .font(.title3.bold())
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
                             }
-                            .buttonStyle(.plain)
-                            DetailActionButton(title: "点赞", systemImage: "hand.thumbsup")
-                            DetailActionButton(title: "收藏", systemImage: "star")
-                            DetailActionButton(title: "不喜欢", systemImage: "hand.thumbsdown")
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            
+                            // 辅助操作按钮
+                            HStack(spacing: 12) {
+                                DetailActionButton(title: "点赞", systemImage: "hand.thumbsup")
+                                DetailActionButton(title: "收藏", systemImage: "star")
+                                DetailActionButton(title: "分享", systemImage: "square.and.arrow.up")
+                            }
+                        }
+                        
+                        if let playError {
+                            Text(playError)
+                                .foregroundColor(.red)
+                                .font(.callout)
+                                .padding(12)
+                                .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                        } else if isResolving {
+                            HStack {
+                                ProgressView()
+                                .padding(.trailing, 8)
+                                Text("正在解析播放地址…")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Divider()
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("简介")
+                                .font(.title3.bold())
+                            Text("这里展示视频简介、标签和更多信息。")
+                                .foregroundStyle(.secondary)
+                                .font(.body)
+                                .lineLimit(4)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
+                    // 右侧：大封面图
                     AsyncImage(url: videoItem.coverImageURL) { phase in
                         switch phase {
                         case .success(let image):
                             image
                                 .resizable()
-                                .aspectRatio(16/9, contentMode: .fill)
-                                .frame(width: 280, height: 158)
-                                .clipped()
-                                .cornerRadius(18)
+                                .aspectRatio(1.778, contentMode: .fit) // 16:9
+                                .frame(width: 500) // 固定封面宽度
+                                .cornerRadius(24)
+                                .shadow(radius: 10, y: 5) // 添加阴影增加层次感
                         case .failure:
-                            Image(systemName: "photo")
-                                .frame(width: 280, height: 158)
-                                .background(Color.gray.opacity(0.1))
-                                .cornerRadius(18)
+                            Color.gray.opacity(0.1)
+                                .frame(width: 500, height: 281)
+                                .cornerRadius(24)
                         case .empty:
                             ProgressView()
-                                .frame(width: 280, height: 158)
+                                .frame(width: 500, height: 281)
                         @unknown default:
                             EmptyView()
                         }
                     }
                 }
+                .padding(32) // 增加顶部区域的内边距
+                .background(.regularMaterial) // 毛玻璃背景
+                .cornerRadius(32)
 
-                Text("简介")
-                    .font(.headline)
-                Text("这里展示视频简介、标签和更多信息。")
-                    .foregroundStyle(.secondary)
+                // 底部：相关推荐
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("相关推荐")
+                        .font(.title2.bold())
+                        .padding(.horizontal, 8)
 
-                if let playError {
-                    Text(playError)
-                        .foregroundColor(.red)
-                } else if isResolving {
-                    ProgressView("正在解析播放地址…")
-                }
-
-                Text("相关推荐")
-                    .font(.headline)
-
-                let columns = Array(repeating: GridItem(.flexible(), spacing: 16), count: 4)
-                LazyVGrid(columns: columns, spacing: 16) {
-                    ForEach(viewModelRecommendationsMock(), id: \.id) { mock in
-                        VideoGridCard(videoItem: mock)
+                    let columns = Array(repeating: GridItem(.flexible(), spacing: 24), count: 4)
+                    LazyVGrid(columns: columns, spacing: 24) {
+                        ForEach(Array(relatedViewModel.items.prefix(8))) { item in
+                            NavigationLink(value: item) {
+                                VideoGridCard(videoItem: item)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    
+                    if relatedViewModel.isLoading {
+                        ProgressView("加载相关推荐…")
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                    } else if let msg = relatedViewModel.errorMessage {
+                        Text(msg)
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
                     }
                 }
+                .padding(.horizontal, 8) // 与上方对齐
             }
-            .padding()
+            .padding(32) // 整个页面的外边距
         }
+        .navigationBarTitleDisplayMode(.inline) // 详情页标题栏精简
         .fullScreenCover(item: $playerURL) { url in
-            PlayerWindowView(url: url)
+            PlayerWindowView(url: url, cid: videoItem.cid, bvid: videoItem.id)
                 .ignoresSafeArea()
+        }
+        .task {
+            relatedViewModel.fetch(bvid: videoItem.id)
         }
     }
 
@@ -695,14 +875,13 @@ struct DetailActionButtonContent: View {
     let systemImage: String
 
     var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: systemImage)
-                .font(.title2)
-            Text(title)
-                .font(.footnote)
-        }
-        .frame(width: 90, height: 70)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        Label(title, systemImage: systemImage)
+            .font(.callout.weight(.medium))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.regularMaterial)
+            .hoverEffect() // 添加悬停效果
+            .clipShape(Capsule())
     }
 }
 

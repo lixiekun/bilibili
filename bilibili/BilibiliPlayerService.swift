@@ -24,21 +24,31 @@ struct BilibiliPlayerService {
             resolvedCID = try await fetchCID(bvid: bvid)
         }
 
-        // 多档清晰度尝试，优先高，再降级，强制选 AVC 流
-        let qnList = [120, 112, 80]
+        // 多档清晰度尝试，优先高，再降级
+        // AVPlayer 原生不支持 B 站的 Dash (音视频分离)，除非是 HLS
+        // 这里我们专注于请求 MP4 (durl)，虽然画质上限通常是 1080P，但兼容性最好
+        let qnList = [120, 116, 112, 80] // 120:4K, 116:1080P60, 112:1080P+, 80:1080P
         for qn in qnList {
-            // 先尝试 dash（fnval 16，含 AVC HLS），不行再 durl/mp4
-            if let info = try await requestPlayURL(bvid: bvid, cid: resolvedCID, qn: qn, fnval: 16) {
+            // 1. 尝试 HLS (fnval=4048) - AVPlayer 原生支持 m3u8
+            // 这通常能获得比普通 MP4 更好的画质（1080P+），但可能需要特定的 platform
+            if let info = try await requestPlayURL(bvid: bvid, cid: resolvedCID, qn: qn, fnval: 4048, platform: "html5") {
                 return info
             }
-            if let info = try await requestPlayURL(bvid: bvid, cid: resolvedCID, qn: qn, fnval: 0) {
+            
+            // 2. 尝试 MP4 (fnval=1)
+            if let info = try await requestPlayURL(bvid: bvid, cid: resolvedCID, qn: qn, fnval: 1, platform: "html5") {
                 return info
             }
         }
+        // 兜底尝试默认
+        if let info = try await requestPlayURL(bvid: bvid, cid: resolvedCID, qn: 80, fnval: 0, platform: "html5") {
+            return info
+        }
+        
         throw PlayerError.noPlayableURL
     }
 
-    private func requestPlayURL(bvid: String, cid: Int, qn: Int, fnval: Int) async throws -> PlayInfo? {
+    private func requestPlayURL(bvid: String, cid: Int, qn: Int, fnval: Int, platform: String = "pc") async throws -> PlayInfo? {
         var components = URLComponents(string: "https://api.bilibili.com/x/player/playurl")!
         var signer = BilibiliWBI()
         let signedParams = try await signer.sign(params: [
@@ -48,7 +58,7 @@ struct BilibiliPlayerService {
             "fourk": "1",
             "qn": "\(qn)",
             "fnver": "0",
-            "platform": "pc",
+            "platform": platform,
             "otype": "json"
         ])
         components.queryItems = signedParams.map { URLQueryItem(name: $0.key, value: $0.value) }
@@ -81,57 +91,15 @@ struct BilibiliPlayerService {
             let chosen = backup ?? primary
             if let chosen, let url = URL(string: chosen) {
                 #if DEBUG
-                print("playurl selected durl qn=\(qn) fnval=\(fnval) primary=\(primary?.prefix(80) ?? "") backup=\(backup?.prefix(80) ?? "") chosen=\(chosen.prefix(120))")
+                print("playurl selected durl qn=\(qn) fnval=\(fnval) quality=\(json["data"]["quality"].intValue) url=\(chosen.prefix(100))")
                 #endif
                 return PlayInfo(url: url)
             }
         }
 
-        // 如无 durl 再尝试 dash AVC
-        if let dash = json["data"]["dash"].dictionary {
-            let hasHDR = dash["hdr"] != nil || dash["dolby"] != nil
-            if hasHDR {
-                #if DEBUG
-                print("skip dash because of HDR/Dolby")
-                #endif
-                return nil
-            }
-            let videos = dash["video"]?.arrayValue ?? []
-            let sorted = videos.sorted { $0["id"].intValue > $1["id"].intValue }
-            
-            // 1. 尝试 HEVC (codecid 12) - 适合真机，模拟器可能绿屏
-            #if !targetEnvironment(simulator)
-            if let hevc = sorted.first(where: { $0["codecid"].intValue == 12 }),
-               let baseURL = hevc["baseUrl"].string ?? hevc["base_url"].string,
-               let url = URL(string: baseURL) {
-                #if DEBUG
-                print("playurl selected dash HEVC id=\(hevc["id"].intValue) url=\(baseURL.prefix(120))")
-                #endif
-                return PlayInfo(url: url)
-            }
-            #endif
-            
-            // 2. 尝试 AVC (codecid 7) - 兼容性最好
-            if let avc = sorted.first(where: { $0["codecid"].intValue == 7 }),
-               let baseURL = avc["baseUrl"].string ?? avc["base_url"].string,
-               let url = URL(string: baseURL) {
-                #if DEBUG
-                print("playurl selected dash AVC id=\(avc["id"].intValue) url=\(baseURL.prefix(120))")
-                #endif
-                return PlayInfo(url: url)
-            }
-            
-            // 3. 兜底 (任意格式)
-            if let first = sorted.first,
-               let baseURL = first["baseUrl"].string ?? first["base_url"].string,
-               let url = URL(string: baseURL) {
-                #if DEBUG
-                print("playurl selected dash fallback id=\(first["id"].intValue) codecid=\(first["codecid"].intValue) url=\(baseURL.prefix(120))")
-                #endif
-                return PlayInfo(url: url)
-            }
-        }
-
+        // AVPlayer 无法直接播放 B 站的 Dash (m4s) 音视频分离流，因此忽略 Dash 数据
+        // 如果未来需要支持 4K/Dash，需要引入 ffmpeg 或自行实现 Dash 播放器
+        
         return nil
     }
 
