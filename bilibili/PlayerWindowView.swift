@@ -3,7 +3,7 @@ import AVKit
 import Combine
 
 struct PlayerWindowView: View {
-    let url: URL
+    let playInfo: BilibiliPlayerService.PlayInfo
     let cid: Int?
     let bvid: String? // 新增 bvid，用于历史记录上报
     
@@ -14,9 +14,12 @@ struct PlayerWindowView: View {
     
     // 用于保持 timer 的引用
     @State private var timeObserver: Any?
+    
+    // KSPlayer 状态
+    // @State private var isKSPlaying = true
 
-    init(url: URL, cid: Int? = nil, bvid: String? = nil) {
-        self.url = url
+    init(playInfo: BilibiliPlayerService.PlayInfo, cid: Int? = nil, bvid: String? = nil) {
+        self.playInfo = playInfo
         self.cid = cid
         self.bvid = bvid
     }
@@ -24,18 +27,14 @@ struct PlayerWindowView: View {
     var body: some View {
         ZStack {
             if let player {
-                // 使用原生 AVPlayerViewController 并通过 contentOverlayView 注入弹幕
-                // 这样可以获得原生的播放控制体验，同时避免遮挡
+                // 原生 AVPlayer 体验
                 PlayerControllerView(player: player, danmakuEngine: danmakuEngine, showDanmaku: showDanmaku)
                     .ignoresSafeArea()
             } else {
                 ProgressView("正在加载播放器…")
             }
-
+            
             // 自定义控制层 (关闭按钮 + 弹幕开关)
-            // 注意：由于 AVPlayerViewController 会接管手势，这些按钮可能需要放在 contentOverlayView 里
-            // 或者放在 ZStack 的最上层，但要确保不遮挡播放器控件
-            // 目前先保留在这里，如果点击不灵敏，可以考虑也移入 contentOverlayView
             VStack {
                 HStack {
                     // 关闭按钮
@@ -51,6 +50,24 @@ struct PlayerWindowView: View {
                     .background(.black.opacity(0.5), in: Circle())
                     .buttonStyle(.plain)
                     .hoverEffect()
+                    
+                    Spacer()
+                    
+                    // 清晰度调试信息
+                    #if DEBUG
+                    HStack(spacing: 4) {
+                        Text("Q: \(playInfo.quality) | \(playInfo.format)")
+                        if let delegate = resourceLoaderDelegate {
+                            // Use a binding or just read the property.
+                            // Since danmakuEngine updates frequently, this Text should refresh.
+                            Text("| \(delegate.debugInfo)")
+                        }
+                    }
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.white)
+                    .padding(6)
+                    .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                    #endif
                     
                     Spacer()
                     
@@ -82,20 +99,38 @@ struct PlayerWindowView: View {
     }
 
     private func configurePlayer() async {
+        // 无论是 DASH 还是 URL 模式，都走统一的 createPlayer
+        
+        // 预先准备 headers (仅用于非 DASH)
         var headers: [String: String] = [
-            "User-Agent": "Mozilla/5.0 (VisionOS) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
             "Referer": "https://www.bilibili.com"
         ]
         if let cookies = HTTPCookieStorage.shared.cookies, !cookies.isEmpty {
             let cookieString = cookies.compactMap { "\($0.name)=\($0.value)" }.joined(separator: "; ")
             headers["Cookie"] = cookieString
         }
-        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-        let item = AVPlayerItem(asset: asset)
-        item.preferredPeakBitRate = 0 // 0 表示不限制，保持源码率
-        let newPlayer = AVPlayer(playerItem: item)
         
-        // 添加时间监听，每 0.1 秒更新一次弹幕引擎，并定期上报历史记录
+        // 并行加载：同时创建播放器和加载弹幕
+        // 注意：createPlayer 现在会处理 playInfo.source 的类型
+        let currentURL: URL
+        if case .url(let u) = playInfo.source {
+            currentURL = u
+        } else {
+            // DASH 模式下，createPlayer 内部使用虚拟 URL，这里的 currentURL 仅作为占位
+            currentURL = URL(string: "http://dummy")!
+        }
+        
+        async let playerTask = createPlayer(url: currentURL, headers: headers)
+        async let danmakuTask = loadDanmaku()
+        
+        // 等待播放器创建完成
+        let newPlayer = await playerTask
+        
+        // 设置播放器
+        self.player = newPlayer
+        
+        // 添加时间监听... (后续代码保持不变)
         let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
         timeObserver = newPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak danmakuEngine] time in
             let currentTime = time.seconds
@@ -111,23 +146,61 @@ struct PlayerWindowView: View {
             }
         }
         
-        self.player = newPlayer
+        // 开始播放
         newPlayer.play()
         
-        // 加载弹幕数据
-        if let cid = cid {
-            Task {
-                do {
-                    print("开始加载弹幕 CID: \(cid)")
-                    let danmakus = try await DanmakuService().fetchDanmaku(cid: cid)
-                    print("弹幕加载成功，共 \(danmakus.count) 条")
-                    await MainActor.run {
-                        danmakuEngine.load(danmakus: danmakus)
-                    }
-                } catch {
-                    print("弹幕加载失败: \(error)")
-                }
+        // 等待弹幕加载完成（不阻塞播放）
+        _ = await danmakuTask
+    }
+    
+    @State private var resourceLoaderDelegate: BilibiliResourceLoaderDelegate?
+
+    private func createPlayer(url: URL, headers: [String: String]) async -> AVPlayer {
+        let asset: AVURLAsset
+        
+        // 判断是否为 DASH (通过判断 format 字段，或者 source 类型)
+        if case .dash(let vInfo, let aInfo) = playInfo.source {
+            // 构造自定义 Scheme 的 Master Playlist URL
+            // 注意：这里实际上不需要真实的 URL，只要是 custom-scheme 即可触发 delegate
+            let masterURL = URL(string: "custom-scheme://playlist/master.m3u8")!
+            // 关键修改：传入 headers options，确保后续 HTTP 请求带上 Referer
+            asset = AVURLAsset(url: masterURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+            
+            // 初始化 Delegate (强引用，否则会被释放)
+            let delegate = BilibiliResourceLoaderDelegate(videoInfo: vInfo, audioInfo: aInfo)
+            self.resourceLoaderDelegate = delegate
+            
+            // 设置 Delegate
+            asset.resourceLoader.setDelegate(delegate, queue: .main)
+        } else {
+            // 普通 HLS/MP4
+            asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        }
+        
+        let item = AVPlayerItem(asset: asset)
+        item.preferredPeakBitRate = 0 // 0 表示不限制，保持源码率
+        
+        // 预加载关键属性，加快播放器初始化
+        item.automaticallyHandlesInterstitialEvents = true
+        
+        let newPlayer = AVPlayer(playerItem: item)
+        newPlayer.automaticallyWaitsToMinimizeStalling = true
+        
+        return newPlayer
+    }
+    
+    private func loadDanmaku() async {
+        guard let cid = cid else { return }
+        
+        do {
+            print("开始加载弹幕 CID: \(cid)")
+            let danmakus = try await DanmakuService().fetchDanmaku(cid: cid)
+            print("弹幕加载成功，共 \(danmakus.count) 条")
+            await MainActor.run {
+                danmakuEngine.load(danmakus: danmakus)
             }
+        } catch {
+            print("弹幕加载失败: \(error)")
         }
     }
 

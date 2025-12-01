@@ -12,7 +12,7 @@ struct BilibiliWBI {
 
     mutating func ensureKey() async throws {
         // 如果已有缓存且未过期（比如 1 小时），直接使用
-        if let key = Self.cachedMixinKey, Date().timeIntervalSince1970 - Self.lastFetchTime < 3600 {
+        if Self.cachedMixinKey != nil, Date().timeIntervalSince1970 - Self.lastFetchTime < 3600 {
             return
         }
         let key = try await fetchMixinKey()

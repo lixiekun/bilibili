@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AVKit
+import SDWebImageSwiftUI
 
 @MainActor
 struct ContentView: View {
@@ -48,16 +49,7 @@ struct ContentView: View {
                 .tag(Tab.profile)
                 .tabItem {
                     if let face = loginViewModel.userProfile?.face {
-                        AsyncImage(url: face) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image.resizable()
-                            default:
-                                Image(systemName: "person.circle")
-                            }
-                        }
-                        .frame(width: 22, height: 22)
-                        .clipShape(Circle())
+                        UserAvatarImage(url: face, size: 22)
                     } else {
                         Label("我的", systemImage: "person.circle")
                     }
@@ -88,7 +80,7 @@ struct ContentView: View {
                 reload(for: selectedTab)
             }
         }
-        .onChange(of: selectedTab) { newValue in
+        .onChange(of: selectedTab) { oldValue, newValue in
             if newValue == .follow,
                loginViewModel.userProfile != nil,
                followViewModel.videoItems.isEmpty {
@@ -286,16 +278,7 @@ struct ContentView: View {
                     if let profile = loginViewModel.userProfile {
                         // 用户信息头
                         VStack(spacing: 16) {
-                            AsyncImage(url: profile.face) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image.resizable().scaledToFill()
-                                default:
-                                    Image(systemName: "person.crop.circle")
-                                }
-                            }
-                            .frame(width: 80, height: 80)
-                            .clipShape(Circle())
+                            UserAvatarImage(url: profile.face, size: 80, placeholderIcon: "person.crop.circle")
                             Text(profile.uname).font(.title2.bold())
                             Button("退出登录") {
                                 HTTPCookieStorage.shared.cookies?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
@@ -421,53 +404,156 @@ struct VideoRow: View {
     }
 }
 
-struct VideoGridCard: View {
-    let videoItem: VideoItem
-
+// 独立的视频封面图片组件，确保 WebImage 是顶层视图（符合 SDWebImageSwiftUI FAQ）
+struct VideoCoverImage: View {
+    let url: URL?
+    let duration: Int
+    
+    @ViewBuilder
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // 封面区域
+        GeometryReader { geometry in
             ZStack(alignment: .bottomTrailing) {
-                AsyncImage(url: videoItem.coverImageURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(1.778, contentMode: .fill) // 16:9 比例
-                    case .failure:
-                        Color.gray.opacity(0.1)
-                            .overlay(Image(systemName: "photo").foregroundColor(.gray))
-                            .aspectRatio(1.778, contentMode: .fit)
-                    case .empty:
-                        Color.gray.opacity(0.1)
-                            .aspectRatio(1.778, contentMode: .fit)
-                    @unknown default:
-                        EmptyView()
-                    }
+                WebImage(url: url) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Color.gray.opacity(0.1)
+                        .overlay(Image(systemName: "photo").foregroundColor(.gray))
                 }
-                .frame(maxWidth: .infinity)
-                .clipped() // 确保内容不会溢出圆角
+                .indicator(.activity)
+                .frame(width: geometry.size.width, height: geometry.size.width / 1.778) // 16:9 比例
+                .clipped()
                 
                 // 时长标签
-                Text(formatDuration(videoItem.duration))
+                Text(formatDuration(duration))
                     .font(.caption2.bold())
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
-                    .background(.ultraThinMaterial) // 使用磨砂玻璃效果
+                    .background(.ultraThinMaterial)
                     .cornerRadius(4)
                     .padding(6)
                     .foregroundColor(.white)
             }
-            .cornerRadius(12) // 封面圆角
+        }
+        .aspectRatio(1.778, contentMode: .fit) // 确保容器保持 16:9 比例
+    }
+}
 
-            // 信息区域
+// 独立的用户头像组件，确保 WebImage 是顶层视图
+struct UserAvatarImage: View {
+    let url: URL?
+    let size: CGFloat
+    let placeholderIcon: String
+    
+    init(url: URL?, size: CGFloat, placeholderIcon: String = "person.circle") {
+        self.url = url
+        self.size = size
+        self.placeholderIcon = placeholderIcon
+    }
+    
+    @ViewBuilder
+    var body: some View {
+        WebImage(url: url) { image in
+            image
+                .resizable()
+                .scaledToFill()
+        } placeholder: {
+            Image(systemName: placeholderIcon)
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+    }
+}
+
+// Hero 视图中的大封面图片组件
+struct HeroCoverImage: View {
+    let url: URL?
+    let maxWidth: CGFloat
+    
+    @ViewBuilder
+    var body: some View {
+        WebImage(url: url) { image in
+            image
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } placeholder: {
+            Color.gray.opacity(0.1)
+                .frame(width: maxWidth, height: maxWidth / 1.778)
+                .cornerRadius(20)
+        }
+        .indicator(.activity)
+        .frame(maxWidth: maxWidth)
+        .clipped()
+        .cornerRadius(20)
+    }
+}
+
+// 详情页中的大封面图片组件
+struct DetailCoverImage: View {
+    let url: URL?
+    let width: CGFloat
+    
+    @ViewBuilder
+    var body: some View {
+        WebImage(url: url) { image in
+            image
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+        } placeholder: {
+            Color.gray.opacity(0.1)
+                .frame(width: width, height: width / 1.778)
+                .cornerRadius(24)
+        }
+        .indicator(.activity)
+        .frame(width: width)
+        .cornerRadius(24)
+        .shadow(radius: 10, y: 5)
+    }
+}
+
+// Feed 卡片中的小封面图片组件
+struct FeedCoverImage: View {
+    let url: URL?
+    let width: CGFloat
+    let height: CGFloat
+    
+    @ViewBuilder
+    var body: some View {
+        WebImage(url: url) { image in
+            image
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } placeholder: {
+            Color.gray.opacity(0.1)
+                .overlay(Image(systemName: "photo").foregroundColor(.gray))
+                .frame(width: width, height: height)
+                .cornerRadius(12)
+        }
+        .indicator(.activity)
+        .frame(width: width, height: height)
+        .clipped()
+        .cornerRadius(12)
+    }
+}
+
+struct VideoGridCard: View {
+    let videoItem: VideoItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // 封面区域 - 使用固定宽高比
+            VideoCoverImage(url: videoItem.coverImageURL, duration: videoItem.duration)
+                .cornerRadius(12) // 封面圆角
+
+            // 信息区域 - 固定高度
             VStack(alignment: .leading, spacing: 4) {
                 Text(videoItem.title)
                     .font(.headline)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                    .frame(height: 44, alignment: .topLeading) // 固定两行标题的高度 (大约值，视字体大小调整)
-                    .fixedSize(horizontal: false, vertical: true) // 允许垂直方向根据内容调整，但受限于 frame
+                    .frame(height: 44, alignment: .topLeading) // 固定两行标题的高度
+                    .fixedSize(horizontal: false, vertical: false) // 不允许垂直方向调整
                 
                 HStack {
                     Image(systemName: "play.circle")
@@ -483,14 +569,15 @@ struct VideoGridCard: View {
                         .foregroundColor(.secondary)
                 }
                 .foregroundColor(.secondary)
-                .padding(.top, 4)
+                .frame(height: 20) // 固定元数据行高度
             }
             .padding(.horizontal, 4)
+            .padding(.top, 10)
             .padding(.bottom, 12)
+            .frame(maxWidth: .infinity, alignment: .leading) // 确保信息区域宽度一致
         }
         .background(Color.primary.opacity(0.05)) // 极其轻微的背景
         .cornerRadius(16)
-        // 移除 strokeBorder，visionOS 中通常使用 hover effect 和 depth
         .hoverEffect() // 添加 visionOS 标准悬停效果
     }
 }
@@ -542,26 +629,7 @@ private struct HeroView: View {
     var body: some View {
         NavigationLink(value: item) {
             HStack(spacing: 24) {
-                AsyncImage(url: item.coverImageURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(1.778, contentMode: .fill) // 16:9
-                            .frame(maxWidth: 520) // 限制最大宽度，高度自动
-                            .clipped()
-                            .cornerRadius(20)
-                    case .failure:
-                        Color.gray.opacity(0.1)
-                            .frame(width: 520, height: 292) // 保持大约 16:9
-                            .cornerRadius(20)
-                    case .empty:
-                        ProgressView()
-                            .frame(width: 520, height: 292)
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
+                HeroCoverImage(url: item.coverImageURL, maxWidth: 520)
 
                 VStack(alignment: .leading, spacing: 12) {
                     Text(item.title)
@@ -623,27 +691,7 @@ struct VideoFeedCard: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
-            AsyncImage(url: videoItem.coverImageURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 160, height: 96)
-                        .clipped()
-                        .cornerRadius(12)
-                case .failure:
-                    Image(systemName: "photo")
-                        .frame(width: 160, height: 96)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(12)
-                case .empty:
-                    ProgressView()
-                        .frame(width: 160, height: 96)
-                @unknown default:
-                    EmptyView()
-                }
-            }
+            FeedCoverImage(url: videoItem.coverImageURL, width: 160, height: 96)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(videoItem.title)
@@ -669,7 +717,7 @@ struct VideoFeedCard: View {
 
 struct VideoDetailView: View {
     let videoItem: VideoItem
-    @State private var playerURL: URL?
+    @State private var playInfo: BilibiliPlayerService.PlayInfo?
     @State private var isResolving = false
     @State private var playError: String?
     @StateObject private var relatedViewModel = RelatedViewModel()
@@ -747,26 +795,7 @@ struct VideoDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     // 右侧：大封面图
-                    AsyncImage(url: videoItem.coverImageURL) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(1.778, contentMode: .fit) // 16:9
-                                .frame(width: 500) // 固定封面宽度
-                                .cornerRadius(24)
-                                .shadow(radius: 10, y: 5) // 添加阴影增加层次感
-                        case .failure:
-                            Color.gray.opacity(0.1)
-                                .frame(width: 500, height: 281)
-                                .cornerRadius(24)
-                        case .empty:
-                            ProgressView()
-                                .frame(width: 500, height: 281)
-                        @unknown default:
-                            EmptyView()
-                        }
-                    }
+                    DetailCoverImage(url: videoItem.coverImageURL, width: 500)
                 }
                 .padding(32) // 增加顶部区域的内边距
                 .background(.regularMaterial) // 毛玻璃背景
@@ -803,8 +832,8 @@ struct VideoDetailView: View {
             .padding(32) // 整个页面的外边距
         }
         .navigationBarTitleDisplayMode(.inline) // 详情页标题栏精简
-        .fullScreenCover(item: $playerURL) { url in
-            PlayerWindowView(url: url, cid: videoItem.cid, bvid: videoItem.id)
+        .fullScreenCover(item: $playInfo) { info in
+            PlayerWindowView(playInfo: info, cid: videoItem.cid, bvid: videoItem.id)
                 .ignoresSafeArea()
         }
         .task {
@@ -814,11 +843,11 @@ struct VideoDetailView: View {
 
     private func startPlayback() {
         Task {
+            print("🚀 [Debug] startPlayback called!")
             isResolving = true
             playError = nil
             do {
-                let info = try await playerService.fetchPlayURL(bvid: videoItem.id, cid: videoItem.cid)
-                playerURL = info.url
+                playInfo = try await playerService.fetchPlayURL(bvid: videoItem.id, cid: videoItem.cid)
             } catch {
                 #if DEBUG
                 print("playback failed for \(videoItem.id): \(error)")
@@ -838,9 +867,9 @@ struct VideoDetailView: View {
     }
 }
 
-extension URL: Identifiable {
-    public var id: String { absoluteString }
-}
+// extension URL: Identifiable {
+//     public var id: String { absoluteString }
+// }
 
 private func formatDuration(_ seconds: Int) -> String {
     let minutes = seconds / 60

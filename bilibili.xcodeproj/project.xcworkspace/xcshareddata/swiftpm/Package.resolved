@@ -1,19 +1,37 @@
 {
-  "originHash" : "b3eb72637281b9de0e60709c70441754d513c1cf9babd8b458b7cd454a37bc7c",
+  "originHash" : "5ff57af6167cc0f2803f2b9fed5e43c8075d42b1972b15442e33cfff9d0c095e",
   "pins" : [
     {
       "identity" : "alamofire",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Alamofire/Alamofire.git",
+      "location" : "https://github.com/Alamofire/Alamofire",
       "state" : {
         "revision" : "513364f870f6bfc468f9d2ff0a95caccc10044c5",
         "version" : "5.10.2"
       }
     },
     {
+      "identity" : "sdwebimage",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/SDWebImage/SDWebImage.git",
+      "state" : {
+        "revision" : "e53f6226eaab490291096cfbd9b2b109ea968e8d",
+        "version" : "5.21.4"
+      }
+    },
+    {
+      "identity" : "sdwebimageswiftui",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/SDWebImage/SDWebImageSwiftUI",
+      "state" : {
+        "revision" : "0e331457ca9af2f0b08bcaa138a91ffb907b004f",
+        "version" : "3.1.4"
+      }
+    },
+    {
       "identity" : "swiftyjson",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/SwiftyJSON/SwiftyJSON.git",
+      "location" : "https://github.com/SwiftyJSON/SwiftyJSON",
       "state" : {
         "revision" : "af76cf3ef710b6ca5f8c05f3a31307d44a3c5828",
         "version" : "5.0.2"

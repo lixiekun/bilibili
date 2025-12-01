@@ -9,13 +9,22 @@ import SwiftUI
 
 @main
 struct bilibiliApp: App {
+    init() {
+        // 应用启动时预加载播放器组件
+        Task { @MainActor in
+            PlayerPreloader.shared.preload()
+        }
+    }
+    
     var body: some Scene {
         WindowGroup {
             ContentView(viewModel: RecommendationViewModel())
         }
         WindowGroup(id: "PlayerWindow", for: String.self) { value in
             if let urlString = value.wrappedValue, let url = URL(string: urlString) {
-                PlayerWindowView(url: url)
+                // 这里只是简单的 fallback，实际多窗口打开通常通过 VideoDetailView 的 fullScreenCover
+                // 如果必须支持多窗口，需要重构数据传递方式
+                PlayerWindowView(playInfo: BilibiliPlayerService.PlayInfo(source: .url(url), quality: 0, format: "mp4"))
             } else {
                 Text("无效的播放地址")
             }
