@@ -49,6 +49,41 @@ struct Danmaku: Identifiable, Equatable {
         
         self.timestamp = TimeInterval(parts[4]) ?? 0
     }
+    
+    // 新增：全参数构造函数，用于 Protobuf 转换
+    init(id: String = UUID().uuidString,
+         time: Double,
+         mode: Int,
+         fontSize: Int,
+         color: String,
+         userId: String,
+         text: String,
+         date: Int64) {
+        
+        self.text = text
+        self.time = time
+        
+        if [1, 2, 3].contains(mode) {
+            self.mode = .scrollR2L
+        } else if mode == 5 {
+            self.mode = .top
+        } else if mode == 4 {
+            self.mode = .bottom
+        } else {
+            self.mode = .unknown
+        }
+        
+        self.fontSize = fontSize
+        
+        // Parse hex color string #RRGGBB
+        if color.hasPrefix("#"), let hex = Int(color.dropFirst(), radix: 16) {
+            self.color = Color(rgb: hex)
+        } else {
+            self.color = .white
+        }
+        
+        self.timestamp = TimeInterval(date)
+    }
 }
 
 extension Color {

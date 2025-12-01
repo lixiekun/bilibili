@@ -194,7 +194,32 @@ struct PlayerWindowView: View {
         
         do {
             print("开始加载弹幕 CID: \(cid)")
-            let danmakus = try await DanmakuService().fetchDanmaku(cid: cid)
+            // 获取视频总时长 (如果有的话)
+            var duration = 0
+            if let item = player?.currentItem {
+                // 如果 player 已准备好，尝试获取 duration
+                // 注意：item.duration 可能是 .indefinite (直播) 或 .invalid (未加载)
+                // 对于点播，如果元数据已加载，应该是可用的
+                // 更好的方式是从 playInfo 里传进来，但 playInfo 里只有 timelength (ms) 如果是从 API 获取的
+                // 这里我们简化，尝试从 item 获取，或者硬编码加载前几段
+                if item.status == .readyToPlay {
+                    duration = Int(item.duration.seconds)
+                }
+            }
+            
+            // 如果 player 还没 ready，duration 可能是 0。
+            // 我们可以尝试从 playInfo 中获取时长吗？
+            // BilibiliPlayerService.PlayInfo 目前没有 duration 字段。
+            // 但 BilibiliPlayerService.DashStreamInfo 也没有。
+            // 没关系，我们可以默认加载多一点，或者后续优化 PlayInfo 传入时长。
+            // 先假设一个较长的时长，比如加载前 30 分钟 (5段)
+            // 或者让 DanmakuService 处理 duration=0 的情况 (已处理，默认加载1段)
+            
+            // 修正：为了确保长视频弹幕加载，我们这里硬编码一个较大的时长或者让 Service 加载更多
+            // 比如加载前 60 分钟 (10段)
+            let estimatedDuration = 3600 
+            
+            let danmakus = try await DanmakuService().fetchDanmaku(cid: cid, duration: estimatedDuration)
             print("弹幕加载成功，共 \(danmakus.count) 条")
             await MainActor.run {
                 danmakuEngine.load(danmakus: danmakus)

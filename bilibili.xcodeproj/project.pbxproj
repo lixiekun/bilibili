@@ -7,6 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		6B6F12F52EDD55D100057EB7 /* Gzip in Frameworks */ = {isa = PBXBuildFile; productRef = 6B6F12F42EDD55D100057EB7 /* Gzip */; };
+		6B6F12F82EDD55F600057EB7 /* SwiftyXMLParser in Frameworks */ = {isa = PBXBuildFile; productRef = 6B6F12F72EDD55F600057EB7 /* SwiftyXMLParser */; };
+		6B6F12FD2EDD577400057EB7 /* SwiftProtobuf in Frameworks */ = {isa = PBXBuildFile; productRef = 6B6F12FC2EDD577400057EB7 /* SwiftProtobuf */; };
+		6B6F12FF2EDD577400057EB7 /* SwiftProtobufPluginLibrary in Frameworks */ = {isa = PBXBuildFile; productRef = 6B6F12FE2EDD577400057EB7 /* SwiftProtobufPluginLibrary */; };
+		6B6F13012EDD577400057EB7 /* protoc in Frameworks */ = {isa = PBXBuildFile; productRef = 6B6F13002EDD577400057EB7 /* protoc */; };
+		6B6F13032EDD577400057EB7 /* protoc-gen-swift in Frameworks */ = {isa = PBXBuildFile; productRef = 6B6F13022EDD577400057EB7 /* protoc-gen-swift */; };
 		6BAA29F52ED2DD9900A7540D /* SwiftyJSON in Frameworks */ = {isa = PBXBuildFile; productRef = 6BAA29F42ED2DD9900A7540D /* SwiftyJSON */; };
 		6BAA2A032ED2E7C900A7540D /* Alamofire in Frameworks */ = {isa = PBXBuildFile; productRef = 6BAA2A022ED2E7C900A7540D /* Alamofire */; };
 		6BAA2A8F2EDC79F100A7540D /* SDWebImageSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 6BAA2A8E2EDC79F100A7540D /* SDWebImageSwiftUI */; };
@@ -60,7 +66,13 @@
 			files = (
 				6BAA2A8F2EDC79F100A7540D /* SDWebImageSwiftUI in Frameworks */,
 				6BAA2A032ED2E7C900A7540D /* Alamofire in Frameworks */,
+				6B6F12FF2EDD577400057EB7 /* SwiftProtobufPluginLibrary in Frameworks */,
+				6B6F12F52EDD55D100057EB7 /* Gzip in Frameworks */,
 				6BAA29F52ED2DD9900A7540D /* SwiftyJSON in Frameworks */,
+				6B6F13032EDD577400057EB7 /* protoc-gen-swift in Frameworks */,
+				6B6F13012EDD577400057EB7 /* protoc in Frameworks */,
+				6B6F12F82EDD55F600057EB7 /* SwiftyXMLParser in Frameworks */,
+				6B6F12FD2EDD577400057EB7 /* SwiftProtobuf in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -115,6 +127,12 @@
 				6BAA29F42ED2DD9900A7540D /* SwiftyJSON */,
 				6BAA2A022ED2E7C900A7540D /* Alamofire */,
 				6BAA2A8E2EDC79F100A7540D /* SDWebImageSwiftUI */,
+				6B6F12F42EDD55D100057EB7 /* Gzip */,
+				6B6F12F72EDD55F600057EB7 /* SwiftyXMLParser */,
+				6B6F12FC2EDD577400057EB7 /* SwiftProtobuf */,
+				6B6F12FE2EDD577400057EB7 /* SwiftProtobufPluginLibrary */,
+				6B6F13002EDD577400057EB7 /* protoc */,
+				6B6F13022EDD577400057EB7 /* protoc-gen-swift */,
 			);
 			productName = bilibili;
 			productReference = 6BD4905F2DE60A6000A0CA2C /* bilibili.app */;
@@ -175,6 +193,9 @@
 				6BAA29F32ED2DD1E00A7540D /* XCRemoteSwiftPackageReference "SwiftyJSON" */,
 				6BAA2A012ED2E7C900A7540D /* XCRemoteSwiftPackageReference "Alamofire" */,
 				6BAA2A8D2EDC79F100A7540D /* XCRemoteSwiftPackageReference "SDWebImageSwiftUI" */,
+				6B6F12F32EDD55D100057EB7 /* XCRemoteSwiftPackageReference "GzipSwift" */,
+				6B6F12F62EDD55F600057EB7 /* XCRemoteSwiftPackageReference "SwiftyXMLParser" */,
+				6B6F12FB2EDD577400057EB7 /* XCRemoteSwiftPackageReference "swift-protobuf" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6BD490602DE60A6000A0CA2C /* Products */;
@@ -472,6 +493,30 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		6B6F12F32EDD55D100057EB7 /* XCRemoteSwiftPackageReference "GzipSwift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/1024jp/GzipSwift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.1.0;
+			};
+		};
+		6B6F12F62EDD55F600057EB7 /* XCRemoteSwiftPackageReference "SwiftyXMLParser" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/yahoojapan/SwiftyXMLParser";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.6.0;
+			};
+		};
+		6B6F12FB2EDD577400057EB7 /* XCRemoteSwiftPackageReference "swift-protobuf" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-protobuf.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.33.3;
+			};
+		};
 		6BAA29F32ED2DD1E00A7540D /* XCRemoteSwiftPackageReference "SwiftyJSON" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/SwiftyJSON/SwiftyJSON";
@@ -499,6 +544,36 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		6B6F12F42EDD55D100057EB7 /* Gzip */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6B6F12F32EDD55D100057EB7 /* XCRemoteSwiftPackageReference "GzipSwift" */;
+			productName = Gzip;
+		};
+		6B6F12F72EDD55F600057EB7 /* SwiftyXMLParser */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6B6F12F62EDD55F600057EB7 /* XCRemoteSwiftPackageReference "SwiftyXMLParser" */;
+			productName = SwiftyXMLParser;
+		};
+		6B6F12FC2EDD577400057EB7 /* SwiftProtobuf */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6B6F12FB2EDD577400057EB7 /* XCRemoteSwiftPackageReference "swift-protobuf" */;
+			productName = SwiftProtobuf;
+		};
+		6B6F12FE2EDD577400057EB7 /* SwiftProtobufPluginLibrary */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6B6F12FB2EDD577400057EB7 /* XCRemoteSwiftPackageReference "swift-protobuf" */;
+			productName = SwiftProtobufPluginLibrary;
+		};
+		6B6F13002EDD577400057EB7 /* protoc */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6B6F12FB2EDD577400057EB7 /* XCRemoteSwiftPackageReference "swift-protobuf" */;
+			productName = protoc;
+		};
+		6B6F13022EDD577400057EB7 /* protoc-gen-swift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6B6F12FB2EDD577400057EB7 /* XCRemoteSwiftPackageReference "swift-protobuf" */;
+			productName = "protoc-gen-swift";
+		};
 		6BAA29F42ED2DD9900A7540D /* SwiftyJSON */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 6BAA29F32ED2DD1E00A7540D /* XCRemoteSwiftPackageReference "SwiftyJSON" */;
