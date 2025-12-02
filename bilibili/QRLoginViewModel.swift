@@ -147,11 +147,7 @@ final class QRLoginViewModel: ObservableObject {
                 .serializingData()
                 .value
 
-            #if DEBUG
-            if let raw = String(data: data, encoding: .utf8) {
-                print("Nav response raw: \(raw)")
-            }
-            #endif
+      
 
             struct NavResponse: Decodable {
                 struct Data: Decodable {

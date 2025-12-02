@@ -17,7 +17,7 @@ enum CookieManager {
     static func restore() -> Bool {
         guard let data = UserDefaults.standard.data(forKey: key) else { return false }
         do {
-            if let cookies = try NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(data) as? [HTTPCookie] {
+            if let cookies = try NSKeyedUnarchiver.unarchivedObject(ofClasses: [NSArray.self, HTTPCookie.self], from: data) as? [HTTPCookie] {
                 cookies.forEach { HTTPCookieStorage.shared.setCookie($0) }
                 return true
             }
@@ -31,4 +31,3 @@ enum CookieManager {
         UserDefaults.standard.removeObject(forKey: key)
     }
 }
-

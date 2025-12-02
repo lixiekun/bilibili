@@ -26,6 +26,7 @@ struct BilibiliPlayerService {
         let source: PlaySource
         let quality: Int
         let format: String
+        let cid: Int?
         
         // 兼容旧代码的便利属性，只在单 URL 模式下有效
         var url: URL? {
@@ -194,7 +195,7 @@ struct BilibiliPlayerService {
                     #if DEBUG
                     print("playurl matched DASH quality=\(quality) codec=\(vInfo.codecs)")
                     #endif
-                    return PlayInfo(source: .dash(video: vInfo, audio: aInfo), quality: quality, format: "dash")
+                    return PlayInfo(source: .dash(video: vInfo, audio: aInfo), quality: quality, format: "dash", cid: cid)
                 }
             }
         }
@@ -210,7 +211,7 @@ struct BilibiliPlayerService {
                 print("playurl matched DURL/HLS quality=\(quality) url=\(chosen.prefix(50))")
                 #endif
                 // 只要拿到 url，就认为是可播放的（MP4 或 HLS）
-                return PlayInfo(source: .url(url), quality: quality, format: format)
+                return PlayInfo(source: .url(url), quality: quality, format: format, cid: cid)
             }
         }
 

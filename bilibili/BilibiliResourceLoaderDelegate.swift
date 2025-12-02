@@ -16,17 +16,29 @@ class BilibiliResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDelegate, O
         return URLSession(configuration: config, delegate: nil, delegateQueue: queue)
     }()
     
-    // 简单内存缓存，防止重复请求 Sidx
-    private var sidxCache: [URL: Data] = [:]
-    private let sidxLock = NSLock()
+    // 简单内存缓存，防止重复请求 Sidx（使用 actor 确保并发安全）
+    private let sidxCache = SidxCache()
     
     // 增加 debugInfo 属性供外部读取
     @Published var debugInfo: String = ""
     
     // 回调闭包，用于非 Combine 场景或跨线程更新
     var onDebugInfoUpdate: ((String) -> Void)?
-    
+
     private let videoCodecBlackList = ["avc1.640034"] // high 5.2 is not supported
+
+    // 并发安全的 Sidx 缓存
+    private actor SidxCache {
+        private var storage: [URL: Data] = [:]
+
+        func get(_ url: URL) -> Data? {
+            storage[url]
+        }
+
+        func set(_ url: URL, data: Data) {
+            storage[url] = data
+        }
+    }
     
     init(videoInfo: BilibiliPlayerService.DashStreamInfo, audioInfo: BilibiliPlayerService.DashStreamInfo) {
         self.videoInfo = videoInfo
@@ -35,15 +47,7 @@ class BilibiliResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDelegate, O
     
     // 辅助方法：使用 session dataTask 下载 Sidx
     private func loadData(url: URL, range: String) async throws -> Data {
-        // 1. 查缓存
-        let cacheKey = url
-        sidxLock.lock()
-        if let cached = sidxCache[cacheKey] {
-            sidxLock.unlock()
-            return cached
-        }
-        sidxLock.unlock()
-        
+        // 1. 查缓存（已在外层处理，这里直接请求）
         // 2. 网络请求
         return try await withCheckedThrowingContinuation { continuation in
             var request = URLRequest(url: url)
@@ -87,22 +91,16 @@ class BilibiliResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDelegate, O
     
     // 重新封装 loadData 以便处理缓存写入
     private func loadSidxData(url: URL, range: String) async throws -> Data {
-         // 1. 查缓存
-        let cacheKey = url
-        sidxLock.lock()
-        if let cached = sidxCache[cacheKey] {
-            sidxLock.unlock()
+        // 1. 查缓存
+        if let cached = await sidxCache.get(url) {
             return cached
         }
-        sidxLock.unlock()
-        
+
         let data = try await loadData(url: url, range: range)
-        
+
         // 3. 写缓存
-        sidxLock.lock()
-        sidxCache[cacheKey] = data
-        sidxLock.unlock()
-        
+        await sidxCache.set(url, data: data)
+
         return data
     }
     

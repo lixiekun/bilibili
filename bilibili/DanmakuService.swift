@@ -30,7 +30,8 @@ class DanmakuService {
     
     private func fetchDanmakuProtobuf(cid: Int, duration: Int) async throws -> [Danmaku] {
         // B站 Web 端现用接口: https://api.bilibili.com/x/v2/dm/web/seg.so
-        let url = "https://api.bilibili.com/x/v2/dm/web/seg.so"
+        // Demo 使用的是 list/seg.so，我们尝试切换看看是否能获取更多
+        let url = "https://api.bilibili.com/x/v2/dm/list/seg.so"
         
         // 计算分段数，每段 6 分钟 (360秒)
         let segmentDuration = 360
@@ -41,7 +42,7 @@ class DanmakuService {
             for i in 1...max(1, totalSegments) {
                 group.addTask {
                     let parameters: Parameters = [
-                        "type": 1,
+                        "type": 1, // 1: 视频弹幕
                         "oid": cid,
                         "segment_index": i
                     ]
@@ -52,8 +53,13 @@ class DanmakuService {
                     
                     let data = try await NetworkClient.shared
                         .request(url, parameters: parameters, headers: headers)
-                        .serializingData()
+                        .serializingData(emptyResponseCodes: [200, 204, 205]) // 允许空响应
                         .value
+                    
+                    if data.isEmpty {
+                        print("Protobuf fetch returned empty data for segment \(i)")
+                        return []
+                    }
                     
                     let reply = try DmSegMobileReply(serializedData: data)
                     

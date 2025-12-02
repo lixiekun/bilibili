@@ -1,10 +1,3 @@
-//
-//  ContentView.swift
-//  bilibili
-//
-//  Created by 李谢坤 on 2025/5/27.
-//
-
 import SwiftUI
 import AVKit
 import SDWebImageSwiftUI
@@ -17,8 +10,12 @@ struct ContentView: View {
     @StateObject private var rankingViewModel = RankingViewModel()
     @StateObject private var historyViewModel = HistoryViewModel() // 历史记录 VM
     @StateObject private var loginViewModel = QRLoginViewModel()
+    // 添加对 PlayerModel 的观察，以响应恢复状态
+    @ObservedObject private var playerModel = PlayerModel.shared
+
     @State private var isShowingLogin = false
     @State private var selectedTab: Tab = .recommend
+    @State private var recommendPath = NavigationPath() // 推荐页面的导航路径，用于恢复状态
     private let autoLoad: Bool
 
     @MainActor
@@ -28,44 +25,65 @@ struct ContentView: View {
     }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            tabRootView(for: .recommend)
-                .tag(Tab.recommend)
-                .tabItem { Label("推荐", systemImage: "house.fill") }
+        ZStack {
+            TabView(selection: $selectedTab) {
+                tabRootView(for: .recommend)
+                    .tag(Tab.recommend)
+                    .tabItem { Label("推荐", systemImage: "house.fill") }
 
-            tabRootView(for: .follow)
-                .tag(Tab.follow)
-                .tabItem { Label("关注", systemImage: "person.2.fill") }
+                tabRootView(for: .follow)
+                    .tag(Tab.follow)
+                    .tabItem { Label("关注", systemImage: "person.2.fill") }
 
-            tabRootView(for: .hot)
-                .tag(Tab.hot)
-                .tabItem { Label("热门", systemImage: "flame.fill") }
+                tabRootView(for: .hot)
+                    .tag(Tab.hot)
+                    .tabItem { Label("热门", systemImage: "flame.fill") }
 
-            tabRootView(for: .ranking)
-                .tag(Tab.ranking)
-                .tabItem { Label("排行榜", systemImage: "list.number") }
+                tabRootView(for: .ranking)
+                    .tag(Tab.ranking)
+                    .tabItem { Label("排行榜", systemImage: "list.number") }
 
-            tabRootView(for: .profile)
-                .tag(Tab.profile)
-                .tabItem {
-                    if let face = loginViewModel.userProfile?.face {
-                        UserAvatarImage(url: face, size: 22)
-                    } else {
-                        Label("我的", systemImage: "person.circle")
+                tabRootView(for: .profile)
+                    .tag(Tab.profile)
+                    .tabItem {
+                        if let face = loginViewModel.userProfile?.face {
+                            UserAvatarImage(url: face, size: 22)
+                        } else {
+                            Label("我的", systemImage: "person.circle")
+                        }
                     }
+            }
+            .sheet(isPresented: $isShowingLogin, onDismiss: {
+                loginViewModel.cancel()
+            }) {
+                QRLoginView(viewModel: loginViewModel)
+                    .presentationDetents([.fraction(0.5), .medium, .large])
+            }
+            
+            // 全局播放器层 (ZStack 顶层覆盖)
+            // 仅在非沉浸模式且需要显示播放器时显示
+            if playerModel.isWindowPlayerPresented && !playerModel.isImmersiveMode {
+                if let info = playerModel.playInfo, let item = playerModel.currentVideoItem {
+                    PlayerWindowView(playInfo: info, cid: item.cid, bvid: item.id)
+                        .ignoresSafeArea()
+                        .transition(.opacity)
+                        .zIndex(100) // 确保在最顶层
                 }
-        }
-        .sheet(isPresented: $isShowingLogin, onDismiss: {
-            loginViewModel.cancel()
-        }) {
-            QRLoginView(viewModel: loginViewModel)
-                .presentationDetents([.fraction(0.5), .medium, .large])
+            }
         }
         .task {
             if autoLoad {
                 CookieManager.restore()
                 await loginViewModel.restoreFromSavedCookies()
                 reload(for: selectedTab)
+            }
+            
+            // 检查是否有需要恢复的导航状态 (从沉浸模式退出)
+            if let restoredItem = playerModel.restoringVideoItem {
+                print("Restoring navigation to: \(restoredItem.title)")
+                selectedTab = .recommend // 暂时只支持恢复到推荐页
+                recommendPath.append(restoredItem)
+                playerModel.restoringVideoItem = nil
             }
             
             // 预热 WBI 签名 Key，避免首次播放卡顿
@@ -91,16 +109,43 @@ struct ContentView: View {
                 rankingViewModel.fetch()
             }
         }
+        // 监听沉浸模式状态，确保退出时关闭播放器层
+        .onChange(of: playerModel.isImmersiveMode) { _, isImmersive in
+            if isImmersive {
+                print("🎬 ContentView: 沉浸模式开启，隐藏 ZStack 播放器层")
+                // ZStack 中的 if 条件会自动处理隐藏
+            }
+        }
+        // 监听关闭请求
+        .onChange(of: playerModel.shouldDismissPlayerWindow) { _, shouldDismiss in
+            guard shouldDismiss else { return }
+            print("🎬 ContentView: 收到关闭请求，隐藏 ZStack 播放器层")
+            if !playerModel.isImmersiveMode {
+                playerModel.cleanup()
+            }
+            playerModel.isWindowPlayerPresented = false
+            playerModel.shouldDismissPlayerWindow = false
+        }
     }
     
     @ViewBuilder
     private func tabRootView(for tab: Tab) -> some View {
-        NavigationStack {
-            mainContent(for: tab)
-                .navigationDestination(for: VideoItem.self) { item in
-                    VideoDetailView(videoItem: item)
-                        .navigationTitle(item.title)
-                }
+        if tab == .recommend {
+            NavigationStack(path: $recommendPath) {
+                mainContent(for: tab)
+                    .navigationDestination(for: VideoItem.self) { item in
+                        VideoDetailView(videoItem: item)
+                            .navigationTitle(item.title)
+                    }
+            }
+        } else {
+            NavigationStack {
+                mainContent(for: tab)
+                    .navigationDestination(for: VideoItem.self) { item in
+                        VideoDetailView(videoItem: item)
+                            .navigationTitle(item.title)
+                    }
+            }
         }
     }
 
@@ -334,7 +379,7 @@ struct ContentView: View {
                     } else {
                         VStack(spacing: 20) {
                             Text("未登录")
-                                .font(.title)
+                            .font(.title)
                             Button("扫码登录") {
                                 isShowingLogin = true
                                 loginViewModel.startLogin()
@@ -395,6 +440,10 @@ struct ContentView: View {
     }
 }
 
+// ... rest of existing structs ...
+// Note: I will re-include the helper structs (VideoRow, VideoCoverImage, etc.) that were in the original file 
+// to ensure the file remains complete and valid.
+
 struct VideoRow: View {
     let videoItem: VideoItem
 
@@ -404,7 +453,7 @@ struct VideoRow: View {
     }
 }
 
-// 独立的视频封面图片组件，确保 WebImage 是顶层视图（符合 SDWebImageSwiftUI FAQ）
+// 独立的视频封面图片组件
 struct VideoCoverImage: View {
     let url: URL?
     let duration: Int
@@ -422,10 +471,9 @@ struct VideoCoverImage: View {
                         .overlay(Image(systemName: "photo").foregroundColor(.gray))
                 }
                 .indicator(.activity)
-                .frame(width: geometry.size.width, height: geometry.size.width / 1.778) // 16:9 比例
+                .frame(width: geometry.size.width, height: geometry.size.width / 1.778)
                 .clipped()
                 
-                // 时长标签
                 Text(formatDuration(duration))
                     .font(.caption2.bold())
                     .padding(.horizontal, 6)
@@ -436,11 +484,10 @@ struct VideoCoverImage: View {
                     .foregroundColor(.white)
             }
         }
-        .aspectRatio(1.778, contentMode: .fit) // 确保容器保持 16:9 比例
+        .aspectRatio(1.778, contentMode: .fit)
     }
 }
 
-// 独立的用户头像组件，确保 WebImage 是顶层视图
 struct UserAvatarImage: View {
     let url: URL?
     let size: CGFloat
@@ -466,7 +513,6 @@ struct UserAvatarImage: View {
     }
 }
 
-// Hero 视图中的大封面图片组件
 struct HeroCoverImage: View {
     let url: URL?
     let maxWidth: CGFloat
@@ -489,7 +535,6 @@ struct HeroCoverImage: View {
     }
 }
 
-// 详情页中的大封面图片组件
 struct DetailCoverImage: View {
     let url: URL?
     let width: CGFloat
@@ -512,7 +557,6 @@ struct DetailCoverImage: View {
     }
 }
 
-// Feed 卡片中的小封面图片组件
 struct FeedCoverImage: View {
     let url: URL?
     let width: CGFloat
@@ -542,18 +586,16 @@ struct VideoGridCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 封面区域 - 使用固定宽高比
             VideoCoverImage(url: videoItem.coverImageURL, duration: videoItem.duration)
-                .cornerRadius(12) // 封面圆角
+                .cornerRadius(12)
 
-            // 信息区域 - 固定高度
             VStack(alignment: .leading, spacing: 4) {
                 Text(videoItem.title)
                     .font(.headline)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                    .frame(height: 44, alignment: .topLeading) // 固定两行标题的高度
-                    .fixedSize(horizontal: false, vertical: false) // 不允许垂直方向调整
+                    .frame(height: 44, alignment: .topLeading)
+                    .fixedSize(horizontal: false, vertical: false)
                 
                 HStack {
                     Image(systemName: "play.circle")
@@ -569,16 +611,16 @@ struct VideoGridCard: View {
                         .foregroundColor(.secondary)
                 }
                 .foregroundColor(.secondary)
-                .frame(height: 20) // 固定元数据行高度
+                .frame(height: 20)
             }
             .padding(.horizontal, 4)
             .padding(.top, 10)
             .padding(.bottom, 12)
-            .frame(maxWidth: .infinity, alignment: .leading) // 确保信息区域宽度一致
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(Color.primary.opacity(0.05)) // 极其轻微的背景
+        .background(Color.primary.opacity(0.05))
         .cornerRadius(16)
-        .hoverEffect() // 添加 visionOS 标准悬停效果
+        .hoverEffect()
     }
 }
 
@@ -633,7 +675,7 @@ private struct HeroView: View {
 
                 VStack(alignment: .leading, spacing: 12) {
                     Text(item.title)
-                        .font(.extraLargeTitle2.bold()) // visionOS 上可以使用更大的字体
+                        .font(.extraLargeTitle2.bold())
                         .lineLimit(2)
                     
                     HStack {
@@ -660,8 +702,8 @@ private struct HeroView: View {
                 .padding(.vertical, 8)
                 Spacer()
             }
-            .padding(24) // 增加内边距
-            .background(.regularMaterial) // 给整个 Hero 卡片加个背景
+            .padding(24)
+            .background(.regularMaterial)
             .cornerRadius(32)
         }
         .buttonStyle(.plain)
@@ -717,24 +759,26 @@ struct VideoFeedCard: View {
 
 struct VideoDetailView: View {
     let videoItem: VideoItem
-    @State private var playInfo: BilibiliPlayerService.PlayInfo?
     @State private var isResolving = false
     @State private var playError: String?
+    @ObservedObject private var playerModel = PlayerModel.shared
     @StateObject private var relatedViewModel = RelatedViewModel()
     private let playerService = BilibiliPlayerService()
+    
+    @Environment(\.openImmersiveSpace) private var openImmersiveSpace
+    @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
+    @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
-                // 顶部 Hero 区域：左侧信息 + 右侧封面
                 HStack(alignment: .top, spacing: 32) {
-                    // 左侧：视频信息与操作
                     VStack(alignment: .leading, spacing: 20) {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(videoItem.title)
                                 .font(.extraLargeTitle2.bold())
                                 .lineLimit(3)
-                                .fixedSize(horizontal: false, vertical: true) // 允许标题换行并自适应高度
+                                .fixedSize(horizontal: false, vertical: true)
                             
                             HStack(spacing: 16) {
                                 Label(videoItem.authorName, systemImage: "person.circle")
@@ -745,10 +789,9 @@ struct VideoDetailView: View {
                             .foregroundStyle(.secondary)
                         }
 
-                        // 操作按钮组
                         HStack(spacing: 20) {
                             Button {
-                                startPlayback()
+                                startPlayback(native: false)
                             } label: {
                                 Label("播放", systemImage: "play.fill")
                                     .font(.title3.bold())
@@ -758,7 +801,6 @@ struct VideoDetailView: View {
                             .buttonStyle(.borderedProminent)
                             .controlSize(.large)
                             
-                            // 辅助操作按钮
                             HStack(spacing: 12) {
                                 DetailActionButton(title: "点赞", systemImage: "hand.thumbsup")
                                 DetailActionButton(title: "收藏", systemImage: "star")
@@ -794,14 +836,12 @@ struct VideoDetailView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                    // 右侧：大封面图
                     DetailCoverImage(url: videoItem.coverImageURL, width: 500)
                 }
-                .padding(32) // 增加顶部区域的内边距
-                .background(.regularMaterial) // 毛玻璃背景
+                .padding(32)
+                .background(.regularMaterial)
                 .cornerRadius(32)
 
-                // 底部：相关推荐
                 VStack(alignment: .leading, spacing: 20) {
                     Text("相关推荐")
                         .font(.title2.bold())
@@ -827,27 +867,72 @@ struct VideoDetailView: View {
                             .frame(maxWidth: .infinity)
                     }
                 }
-                .padding(.horizontal, 8) // 与上方对齐
+                .padding(.horizontal, 8)
             }
-            .padding(32) // 整个页面的外边距
+            .padding(32)
         }
-        .navigationBarTitleDisplayMode(.inline) // 详情页标题栏精简
-        .fullScreenCover(item: $playInfo) { info in
-            PlayerWindowView(playInfo: info, cid: videoItem.cid, bvid: videoItem.id)
-                .ignoresSafeArea()
+        .overlay {
+            if playerModel.isImmersiveMode {
+                Color.black
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+            }
         }
+        .navigationBarTitleDisplayMode(.inline)
+        
+        // 添加 onDisappear 清理逻辑
+        .onDisappear {
+            print("🎬 VideoDetailView onDisappear")
+            // 如果不是进入沉浸模式，也不是在显示非沉浸播放器（例如返回上级列表），则应该停止播放
+            // 注意：VideoDetailView 的生命周期比较复杂，如果是 NavigationStack push 了新页面，也会 disappear。
+            // 所以这里需要判断：是否正在播放且非沉浸模式且非窗口播放模式
+            // 但实际上，非沉浸播放器(PlayerWindowView)是覆盖在 ContentView 上的，
+            // 如果 VideoDetailView 消失（即用户点击了 NavigationStack 的返回），应该停止播放。
+            
+            // 简单策略：如果用户从详情页返回列表页，此时 PlayerWindowView 可能还在显示。
+            // 应该通知 PlayerWindowView 关闭。
+            
+            // 我们需要一种方式知道是否是“返回”操作。
+            // 可以检查 navigation path，或者简单地，如果当前播放的视频 ID 与此页面的 ID 相同，则停止。
+            
+            if playerModel.bvid == videoItem.id && !playerModel.isImmersiveMode {
+                // 如果正在播放本视频，且不是沉浸模式（沉浸模式会全屏覆盖，详情页还在底部）
+                // 这里有一个问题：如果只是进入全屏播放器（PlayerWindowView），它只是 ZStack 的一层，详情页并没有 disappear。
+                // 只有当用户点击 Navigation 的返回按钮时，详情页才会 disappear。
+                // 此时应该关闭播放器。
+                print("🎬 详情页退出，清理播放器")
+                playerModel.cleanup()
+                playerModel.isWindowPlayerPresented = false
+                playerModel.shouldDismissPlayerWindow = true
+            }
+        }
+        
         .task {
             relatedViewModel.fetch(bvid: videoItem.id)
         }
     }
 
-    private func startPlayback() {
+    private func startPlayback(native: Bool) {
         Task {
-            print("🚀 [Debug] startPlayback called!")
+            print("🚀 [Debug] startPlayback called! Native: \(native)")
             isResolving = true
             playError = nil
+            
+            playerModel.shouldShowNativePlayer = false
+            playerModel.isWindowPlayerPresented = false
+            playerModel.playInfo = nil
+            playerModel.currentVideoItem = videoItem
+            
             do {
-                playInfo = try await playerService.fetchPlayURL(bvid: videoItem.id, cid: videoItem.cid)
+                let info = try await playerService.fetchPlayURL(bvid: videoItem.id, cid: videoItem.cid)
+                playerModel.playInfo = info
+                
+                if native {
+                     // native logic removed
+                } else {
+                    print("🎬 设置 isWindowPlayerPresented = true")
+                    playerModel.isWindowPlayerPresented = true
+                }
             } catch {
                 #if DEBUG
                 print("playback failed for \(videoItem.id): \(error)")
@@ -867,23 +952,10 @@ struct VideoDetailView: View {
     }
 }
 
-// extension URL: Identifiable {
-//     public var id: String { absoluteString }
-// }
-
 private func formatDuration(_ seconds: Int) -> String {
     let minutes = seconds / 60
     let remainingSeconds = seconds % 60
     return String(format: "%d:%02d", minutes, remainingSeconds)
-}
-
-private func viewModelRecommendationsMock() -> [VideoItem] {
-    [
-        .mock(id: "BV1xx411c7mD", title: "【合集】2233 经典曲目", author: "哔哩哔哩娘", views: 1200000, duration: 320),
-        .mock(id: "BV1jj411k7Tp", title: "天马行空的创意短片", author: "创作星球", views: 840000, duration: 210),
-        .mock(id: "BV1zz4y1A7QD", title: "编程菜鸟的 SwiftUI 之旅", author: "学习笔记本", views: 39214, duration: 445),
-        .mock(id: "BV1aa411c7mE", title: "音乐现场：燃炸一夏", author: "音乐频道", views: 502000, duration: 188)
-    ]
 }
 
 private struct DetailActionButton: View {
@@ -909,7 +981,7 @@ struct DetailActionButtonContent: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .background(.regularMaterial)
-            .hoverEffect() // 添加悬停效果
+            .hoverEffect()
             .clipShape(Capsule())
     }
 }

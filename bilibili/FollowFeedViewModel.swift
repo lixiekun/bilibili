@@ -57,8 +57,8 @@ final class FollowFeedViewModel: ObservableObject {
 
                 let json = try JSON(data: data)
                 #if DEBUG
-                let rawPreview = String(data: data, encoding: .utf8) ?? ""
-                let cookieString = allCookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+                let _ = String(data: data, encoding: .utf8) ?? ""
+                let _ = allCookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
         // print("Follow feed cookies: \(cookieString)")
         // print("Follow feed code=\(json["code"].intValue) message=\(json["message"].stringValue) items=\(json["data"]["items"].arrayValue.count)")
         // print("Follow feed raw preview: \(rawPreview.prefix(2000))")
@@ -73,8 +73,8 @@ final class FollowFeedViewModel: ObservableObject {
                     let modules = item["modules"]
                     let authorName = modules["module_author"]["name"].string ?? "未知UP"
                     let major = modules["module_dynamic"]["major"]
-                    // 动态统计信息通常在 modules.module_stat 下
-                    let moduleStat = modules["module_stat"]
+                    // 动态统计信息通常在 modules.module_stat 下（可能包含点赞/评论）
+                    let _ = modules["module_stat"]
 
                     if major["archive"].dictionary != nil {
                         let archive = major["archive"]
