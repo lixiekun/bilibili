@@ -9,6 +9,7 @@ private let logger = Logger(subsystem: "com.bilibili.app", category: "PlayerWind
 // 用于跨视图通信的通知名称
 extension Notification.Name {
     static let enterCinemaMode = Notification.Name("enterCinemaMode")
+    static let enterStudioMode = Notification.Name("enterStudioMode")
 }
 
 struct PlayerWindowView: View {
@@ -18,7 +19,7 @@ struct PlayerWindowView: View {
     
     @StateObject private var playerModel = PlayerModel.shared
     @State private var showDanmaku = true
-    @State private var isEnteringCinema = false  // 防止重复调用
+    @State private var isEnteringImmersive = false  // 防止重复调用
     @Environment(\.dismiss) private var dismiss
     
     // 沉浸模式相关
@@ -73,7 +74,11 @@ struct PlayerWindowView: View {
         // 监听通知
         .onReceive(NotificationCenter.default.publisher(for: .enterCinemaMode)) { _ in
             print("📢 收到 enterCinemaMode 通知!")
-            enterCinemaMode()
+            enterImmersiveSpace(id: "ImmersiveCinema")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .enterStudioMode)) { _ in
+            print("📢 收到 enterStudioMode 通知!")
+            enterImmersiveSpace(id: "ImmersiveStudio")
         }
         .onDisappear {
             print("🎬 PlayerWindowView onDisappear. model immersive: \(playerModel.isImmersiveMode)")
@@ -85,28 +90,29 @@ struct PlayerWindowView: View {
         }
     }
     
-    /// 进入影院模式
-    private func enterCinemaMode() {
+    /// 进入指定沉浸空间
+    private func enterImmersiveSpace(id: String) {
         // 防止重复调用
-        guard !isEnteringCinema else {
-            print("🎬 已在进入影院模式中，忽略重复调用")
+        guard !isEnteringImmersive else {
+            print("🎬 已在进入沉浸模式中，忽略重复调用")
             return
         }
-        isEnteringCinema = true
+        isEnteringImmersive = true
         
         Task { @MainActor in
-            print("🎬 准备进入影院模式...")
+            print("🎬 准备进入沉浸空间 \(id)...")
             
             // 1. 确保视频数据已加载
             await playerModel.loadVideo(playInfo: playInfo, cid: cid, bvid: bvid)
+            playerModel.player?.play() // 再次进入时确保播放器已启动
             
             // 2. 设置状态
             playerModel.isImmersiveMode = true
             
             // 3. 打开沉浸空间
             print("🎬 打开沉浸空间...")
-            let result = await openImmersiveSpace(id: "ImmersiveCinema")
-            print("🎬 沉浸空间打开结果: \(result)")
+            let result = await openImmersiveSpace(id: id)
+            print("🎬 沉浸空间 \(id) 打开结果: \(result)")
             
             // 4. 只有成功打开时才关闭窗口
             if case .opened = result {
@@ -119,12 +125,12 @@ struct PlayerWindowView: View {
             } else {
                 print("🎬 沉浸空间打开失败，保持当前窗口")
                 playerModel.isImmersiveMode = false
-                isEnteringCinema = false
+                isEnteringImmersive = false
             }
 
             // 成功或失败都需要复位标识，避免下一次无法进入
             if case .opened = result {
-                isEnteringCinema = false
+                isEnteringImmersive = false
             }
         }
     }
@@ -147,17 +153,31 @@ struct PlayerWindowView: View {
 /// 参考: https://developer.apple.com/documentation/visionOS/building-an-immersive-media-viewing-experience
 private struct ImmersiveEnvironmentPickerView: View {
     var body: some View {
-        // 影院场景按钮 - 显示在系统环境选项旁边
-        Button {
-            print("🎬 immersiveEnvironmentPicker 影院按钮被点击!")
-            NotificationCenter.default.post(name: .enterCinemaMode, object: nil)
-        } label: {
-            Label {
-                Text("影院")
-            } icon: {
-                Image(systemName: "theatermasks.fill")
+        VStack(alignment: .leading, spacing: 8) {
+            // 影院场景按钮 - 显示在系统环境选项旁边
+            Button {
+                print("🎬 immersiveEnvironmentPicker 影院按钮被点击!")
+                NotificationCenter.default.post(name: .enterCinemaMode, object: nil)
+            } label: {
+                Label {
+                    Text("影院")
+                } icon: {
+                    Image(systemName: "theatermasks.fill")
+                }
+                Text("沉浸式影院")
             }
-            Text("沉浸式影院")
+            
+            Button {
+                print("🎬 immersiveEnvironmentPicker Studio 按钮被点击!")
+                NotificationCenter.default.post(name: .enterStudioMode, object: nil)
+            } label: {
+                Label {
+                    Text("演播室")
+                } icon: {
+                    Image(systemName: "lightbulb.3.fill")
+                }
+                Text("沉浸式演播室")
+            }
         }
         .onAppear {
             print("🎬 ImmersiveEnvironmentPickerView onAppear")

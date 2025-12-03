@@ -102,6 +102,30 @@ struct NativePlayerView: View {
                         .buttonStyle(.plain)
                         .hoverEffect()
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                        
+                        Divider()
+                            .padding(.vertical, 4)
+                        
+                        Text("演播室环境")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                        
+                        Button {
+                            isEnvironmentPickerPresented = false
+                            Task {
+                                await openImmersiveSpace(id: "ImmersiveStudio")
+                                playerModel.isImmersiveMode = true
+                                playerModel.shouldShowNativePlayer = false
+                            }
+                        } label: {
+                            Label("演播室", systemImage: "lightbulb.3.fill")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                        }
+                        .buttonStyle(.plain)
+                        .hoverEffect()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
                     }
                     .padding()
                     .frame(width: 220)
@@ -139,4 +163,3 @@ struct NativePlayerView: View {
         }
     }
 }
-

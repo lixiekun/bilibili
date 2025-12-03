@@ -171,7 +171,8 @@ struct CinemaView: View {
                                 playerModel.restoringVideoItem = playerModel.currentVideoItem
                             }
                             
-                            playerModel.cleanup()
+                            // 退出后暂停，但保留播放器，便于再次进入沉浸模式时直接复用
+                            playerModel.player?.pause()
                             // 退出沉浸模式后，重新打开主窗口 (详情页)
                             openWindow(id: "MainWindow")
                         }
@@ -202,7 +203,19 @@ struct CinemaView: View {
             print("🎬 CinemaView onAppear")
             // 确保沉浸模式状态正确
             playerModel.isImmersiveMode = true
+            
+            // 如果因为退出时清理了播放器，重新进入时确保重新加载
+            if playerModel.player == nil, let info = playerModel.playInfo {
+                Task {
+                    await playerModel.loadVideo(playInfo: info, cid: playerModel.cid, bvid: playerModel.bvid)
+                    playerModel.player?.play()
+                }
+            }
             // 注意：不在这里关闭 PlayerWindow，由 PlayerWindowView 自己处理
+        }
+        .onDisappear {
+            // 任何途径退出沉浸空间都复位状态，避免下一次无法重新进入
+            playerModel.isImmersiveMode = false
         }
     }
 }

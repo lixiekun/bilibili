@@ -42,5 +42,11 @@ struct bilibiliApp: App {
             CinemaView()
         }
         .immersionStyle(selection: .constant(.full), in: .full)
+        
+        // 注册演播室沉浸空间（用于官方 Demo 风格环境对比）
+        ImmersiveSpace(id: "ImmersiveStudio") {
+            StudioView()
+        }
+        .immersionStyle(selection: .constant(.full), in: .full)
     }
 }
