@@ -54,19 +54,7 @@ struct PlayerWindowView: View {
                 ProgressView("正在加载播放器…")
             }
             
-            // 只有播放器就绪后再显示关闭按钮，避免加载态时闪现
-            if playerModel.player != nil {
-                Button(action: closePlayer) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(Color.white)
-                        .padding(10)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-                .padding()
-                .help("关闭播放器")
-            }
+
         }
         .task {
             await playerModel.loadVideo(playInfo: playInfo, cid: cid, bvid: bvid)
