@@ -29,36 +29,54 @@ class DanmakuService {
     // MARK: - Protobuf Implementation
     
     private func fetchDanmakuProtobuf(cid: Int, duration: Int) async throws -> [Danmaku] {
-        // B站 Web 端现用接口: https://api.bilibili.com/x/v2/dm/web/seg.so
-        // Demo 使用的是 list/seg.so，我们尝试切换看看是否能获取更多
-        let url = "https://api.bilibili.com/x/v2/dm/list/seg.so"
+        
+        // 使用 Web 端现用接口
+        let url = "https://api.bilibili.com/x/v2/dm/web/seg.so"
         
         // 计算分段数，每段 6 分钟 (360秒)
         let segmentDuration = 360
         let totalSegments = duration > 0 ? Int(ceil(Double(duration) / Double(segmentDuration))) : 1
         
+        // 预先获取 WBI Key
+        var wbi = BilibiliWBI()
+        try await wbi.ensureKey()
+        
         // 并发加载所有分段
         return try await withThrowingTaskGroup(of: [Danmaku].self) { group in
             for i in 1...max(1, totalSegments) {
                 group.addTask {
-                    let parameters: Parameters = [
-                        "type": 1, // 1: 视频弹幕
-                        "oid": cid,
-                        "segment_index": i
+                    let rawParams: [String: String] = [
+                        "type": "1",
+                        "oid": String(cid),
+                        "segment_index": String(i)
                     ]
                     
+                    var taskWbi = BilibiliWBI()
+                    let signedParams = try await taskWbi.sign(params: rawParams)
+                    
                     let headers: HTTPHeaders = [
-                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+                        "Referer": "https://www.bilibili.com"
                     ]
                     
                     let data = try await NetworkClient.shared
-                        .request(url, parameters: parameters, headers: headers)
-                        .serializingData(emptyResponseCodes: [200, 204, 205]) // 允许空响应
+                        .request(url, parameters: signedParams, headers: headers)
+                        .validate { _, response, _ in
+                            // 304 Not Modified 被认为是成功的，数据虽然是空的，但我们不应报错
+                            if response.statusCode == 304 {
+                                return .success(Void())
+                            }
+                            return .success(Void())
+                        }
+                        .serializingData(emptyResponseCodes: [200, 204, 205, 304]) // 允许 304 空响应
                         .value
                     
+                    // 304 或空数据时，由于我们没有缓存机制，这会导致无弹幕，所以这里需要抛出错误回退 XML
+                    // 注意：如果有本地缓存，应该读取缓存
                     if data.isEmpty {
-                        print("Protobuf fetch returned empty data for segment \(i)")
-                        return []
+                        // 如果是 304，说明服务器认为我们有缓存，但实际上我们没有持久化缓存
+                        // 这种情况应该视为失败，触发 XML 回退
+                        throw DanmakuError.invalidData
                     }
                     
                     let reply = try DmSegMobileReply(serializedData: data)
