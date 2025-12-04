@@ -11,7 +11,7 @@ struct ContentView: View {
     @StateObject private var historyViewModel = HistoryViewModel() // 历史记录 VM
     @StateObject private var loginViewModel = QRLoginViewModel()
     // 添加对 PlayerModel 的观察，以响应恢复状态
-    @ObservedObject private var playerModel = PlayerModel.shared
+    @Environment(PlayerModel.self) private var playerModel
 
     @State private var isShowingLogin = false
     @State private var selectedTab: Tab = .recommend
@@ -761,7 +761,7 @@ struct VideoDetailView: View {
     let videoItem: VideoItem
     @State private var isResolving = false
     @State private var playError: String?
-    @ObservedObject private var playerModel = PlayerModel.shared
+    @Environment(PlayerModel.self) private var playerModel
     @StateObject private var relatedViewModel = RelatedViewModel()
     private let playerService = BilibiliPlayerService()
     

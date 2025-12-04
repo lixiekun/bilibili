@@ -1,14 +1,20 @@
 import SwiftUI
 import RealityKit
 import AVKit
+import Observation
 
 /// 用于标记当前屏幕绑定的 AVPlayer，避免在 RealityKit 更新循环中重复创建 VideoMaterial。
 struct PlayerBindingComponent: Component {
     var playerID: ObjectIdentifier
 }
 
+private let cinemaScreenWidth: Float = 10.0
+private let cinemaScreenAspect: Float = 16.0 / 9.0
+private let cinemaScreenHeight: Float = cinemaScreenWidth / cinemaScreenAspect
+private let controlsDragToMeter: Float = 800.0
+
 struct CinemaView: View {
-    @StateObject private var playerModel = PlayerModel.shared
+    @Environment(PlayerModel.self) private var playerModel
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
@@ -36,7 +42,7 @@ struct CinemaView: View {
             // 1. 创建虚拟屏幕 (即背景墙)
             // 初始尺寸可以设大一点，后续会动态调整
             // 将 cornerRadius 设置为 0 以去除圆角
-            let screenMesh = MeshResource.generatePlane(width: 10.0, height: 5.625, cornerRadius: 0.0)
+            let screenMesh = MeshResource.generatePlane(width: cinemaScreenWidth, height: cinemaScreenHeight, cornerRadius: 0.0)
             let screenEntity = ModelEntity(mesh: screenMesh)
             screenEntity.name = "Screen"
             screenEntity.position = [0, 0, 0] // 相对于 TheaterRoot
@@ -97,37 +103,39 @@ struct CinemaView: View {
             if let screen = theaterRoot.findEntity(named: "Screen"),
                let modelEntity = screen as? ModelEntity {
                 
-                // 更新屏幕缩放
-                modelEntity.scale = [Float(scale), Float(scale), Float(scale)]
+                var scaleYCorrection: Float = 1.0
                 
-                // 确保 VideoMaterial 始终绑定当前播放器
                 if let player = playerModel.player {
-                    modelEntity.model?.materials = [VideoMaterial(avPlayer: player)]
+                    let newID = ObjectIdentifier(player)
+                    let currentID = modelEntity.components[PlayerBindingComponent.self]?.playerID
+                    if currentID != newID {
+                        let material = VideoMaterial(avPlayer: player)
+                        modelEntity.model?.materials = [material]
+                        modelEntity.components.set(PlayerBindingComponent(playerID: newID))
+                    }
+                    
+                    if let currentItem = player.currentItem {
+                        let size = currentItem.presentationSize
+                        if size.width > 0 && size.height > 0 {
+                            let videoAspect = size.width / size.height
+                            let baseAspect = CGFloat(cinemaScreenWidth / cinemaScreenHeight)
+                            let correction = Float(baseAspect / videoAspect)
+                            scaleYCorrection = max(0.2, min(5.0, correction))
+                        }
+                    }
                 } else {
-                    modelEntity.model?.materials = [SimpleMaterial(color: .black, isMetallic: false)]
+                    if !(modelEntity.model?.materials.first is SimpleMaterial) {
+                        modelEntity.model?.materials = [SimpleMaterial(color: .black, isMetallic: false)]
+                    }
+                    modelEntity.components.remove(PlayerBindingComponent.self)
                 }
                 
-                // 动态调整屏幕宽高比以匹配视频内容
-                    if let player = playerModel.player,
-                       let currentItem = player.currentItem {
-                         let size = currentItem.presentationSize
-                         if size.width > 0 && size.height > 0 {
-                             let aspectRatio = size.width / size.height
-                             let baseWidth: Float = 10.0
-                             let newHeight = baseWidth / Float(aspectRatio)
-                             
-                        if let currentMesh = modelEntity.model?.mesh {
-                                 let currentBounds = currentMesh.bounds
-                                 let currentWidth = currentBounds.max.x - currentBounds.min.x
-                                 let currentHeight = currentBounds.max.y - currentBounds.min.y
-                                 
-                                 if abs(currentWidth - baseWidth) > 0.01 || abs(currentHeight - newHeight) > 0.01 {
-                                let newMesh = MeshResource.generatePlane(width: baseWidth, height: newHeight, cornerRadius: 0.0)
-                                     modelEntity.model?.mesh = newMesh
-                                 }
-                             }
-                    }
-                }
+                // 更新屏幕缩放（Y 根据视频宽高比调整）
+                modelEntity.scale = [
+                    Float(scale),
+                    Float(scale) * scaleYCorrection,
+                    Float(scale)
+                ]
                 
                 // 更新弹幕层可见性及尺寸
                 if let danmaku = modelEntity.findEntity(named: "DanmakuLayer") {
@@ -135,8 +143,7 @@ struct CinemaView: View {
                     let bounds = danmaku.visualBounds(relativeTo: danmaku)
                     let localWidth = bounds.extents.x
                     if localWidth > 0 {
-                        let targetWidth: Float = 10.0
-                        let s = targetWidth / localWidth
+                        let s = cinemaScreenWidth / localWidth
                         if abs(danmaku.scale.x - s) > 0.001 {
                             danmaku.scale = [s, s, s]
                         }
@@ -147,8 +154,8 @@ struct CinemaView: View {
             // 更新控制层可见性与位置
             if let controls = content.entities.first(where: { $0.name == "ControlsLayer" }) {
                 controls.isEnabled = isControlsVisible
-                let x = Float(controlsOffset.x) / 1000.0
-                let y = Float(-controlsOffset.y) / 1000.0
+                let x = Float(controlsOffset.x) / controlsDragToMeter
+                let y = Float(-controlsOffset.y) / controlsDragToMeter
                 controls.position = [x, 1.1 + y, -0.8]
             }
             

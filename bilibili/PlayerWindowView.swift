@@ -2,6 +2,7 @@ import SwiftUI
 import AVKit
 import Combine
 import os.log
+import Observation
 
 // 创建一个专用的 Logger
 private let logger = Logger(subsystem: "com.bilibili.app", category: "PlayerWindow")
@@ -9,7 +10,6 @@ private let logger = Logger(subsystem: "com.bilibili.app", category: "PlayerWind
 // 用于跨视图通信的通知名称
 extension Notification.Name {
     static let enterCinemaMode = Notification.Name("enterCinemaMode")
-    static let enterStudioMode = Notification.Name("enterStudioMode")
 }
 
 struct PlayerWindowView: View {
@@ -17,7 +17,7 @@ struct PlayerWindowView: View {
     let cid: Int?
     let bvid: String?
     
-    @StateObject private var playerModel = PlayerModel.shared
+    @Environment(PlayerModel.self) private var playerModel
     @State private var showDanmaku = true
     @State private var isEnteringImmersive = false  // 防止重复调用
     @Environment(\.dismiss) private var dismiss
@@ -63,10 +63,6 @@ struct PlayerWindowView: View {
         .onReceive(NotificationCenter.default.publisher(for: .enterCinemaMode)) { _ in
             print("📢 收到 enterCinemaMode 通知!")
             enterImmersiveSpace(id: "ImmersiveCinema")
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .enterStudioMode)) { _ in
-            print("📢 收到 enterStudioMode 通知!")
-            enterImmersiveSpace(id: "ImmersiveStudio")
         }
         .onDisappear {
             print("🎬 PlayerWindowView onDisappear. model immersive: \(playerModel.isImmersiveMode)")
@@ -155,17 +151,6 @@ private struct ImmersiveEnvironmentPickerView: View {
                 Text("沉浸式影院")
             }
             
-            Button {
-                print("🎬 immersiveEnvironmentPicker Studio 按钮被点击!")
-                NotificationCenter.default.post(name: .enterStudioMode, object: nil)
-            } label: {
-                Label {
-                    Text("演播室")
-                } icon: {
-                    Image(systemName: "lightbulb.3.fill")
-                }
-                Text("沉浸式演播室")
-            }
         }
         .onAppear {
             print("🎬 ImmersiveEnvironmentPickerView onAppear")
