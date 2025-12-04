@@ -19,6 +19,7 @@ struct bilibiliApp: App {
     var body: some Scene {
         WindowGroup(id: "MainWindow") {
             ContentView(viewModel: RecommendationViewModel())
+                .environment(PlayerModel.shared)
         }
         
         WindowGroup(id: "PlayerWindow", for: String.self) { value in
@@ -32,6 +33,7 @@ struct bilibiliApp: App {
                     cid: nil
                 )
                 PlayerWindowView(playInfo: fallbackInfo, cid: nil, bvid: nil)
+                    .environment(PlayerModel.shared)
             } else {
                 Text("无效的播放地址")
             }
@@ -40,12 +42,14 @@ struct bilibiliApp: App {
         // 注册沉浸式影院空间
         ImmersiveSpace(id: "ImmersiveCinema") {
             CinemaView()
+                .environment(PlayerModel.shared)
         }
         .immersionStyle(selection: .constant(.full), in: .full)
         
         // 注册演播室沉浸空间（用于官方 Demo 风格环境对比）
         ImmersiveSpace(id: "ImmersiveStudio") {
             StudioView()
+                .environment(PlayerModel.shared)
         }
         .immersionStyle(selection: .constant(.full), in: .full)
     }

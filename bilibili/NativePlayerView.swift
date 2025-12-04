@@ -8,7 +8,7 @@ struct NativePlayerView: View {
     let cid: Int?
     let bvid: String?
     
-    @StateObject private var playerModel = PlayerModel.shared
+    @Environment(PlayerModel.self) private var playerModel
     @State private var showDanmaku = true
     @Environment(\.dismiss) private var dismiss
     
@@ -26,7 +26,7 @@ struct NativePlayerView: View {
                     Button("退出影院模式") {
                         Task {
                             await dismissImmersiveSpace()
-                            playerModel.isImmersiveMode = false
+                            playerModel.endImmersiveSession()
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -90,9 +90,13 @@ struct NativePlayerView: View {
                         Button {
                             isEnvironmentPickerPresented = false
                             Task {
-                                await openImmersiveSpace(id: "ImmersiveCinema")
-                                playerModel.isImmersiveMode = true
-                                playerModel.shouldShowNativePlayer = false
+                                let result = await openImmersiveSpace(id: "ImmersiveCinema")
+                                if case .opened = result {
+                                    playerModel.beginImmersiveSession()
+                                    playerModel.shouldShowNativePlayer = false
+                                } else {
+                                    playerModel.presentation = .inline
+                                }
                             }
                         } label: {
                             Label("影院", systemImage: "theatermasks.fill")
@@ -114,9 +118,13 @@ struct NativePlayerView: View {
                         Button {
                             isEnvironmentPickerPresented = false
                             Task {
-                                await openImmersiveSpace(id: "ImmersiveStudio")
-                                playerModel.isImmersiveMode = true
-                                playerModel.shouldShowNativePlayer = false
+                                let result = await openImmersiveSpace(id: "ImmersiveStudio")
+                                if case .opened = result {
+                                    playerModel.beginImmersiveSession()
+                                    playerModel.shouldShowNativePlayer = false
+                                } else {
+                                    playerModel.presentation = .inline
+                                }
                             }
                         } label: {
                             Label("演播室", systemImage: "lightbulb.3.fill")
@@ -153,11 +161,11 @@ struct NativePlayerView: View {
             await playerModel.loadVideo(playInfo: playInfo, cid: cid, bvid: bvid)
         }
         .onAppear {
-            playerModel.isImmersiveMode = false
+            playerModel.presentation = .inline
         }
         .onDisappear {
             // 简单清理
-            if !playerModel.isImmersiveMode {
+            if playerModel.presentation != .immersive {
                 playerModel.cleanup()
             }
         }

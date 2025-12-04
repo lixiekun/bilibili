@@ -8,7 +8,7 @@ struct PlayerBindingComponent: Component {
 }
 
 struct CinemaView: View {
-    @StateObject private var playerModel = PlayerModel.shared
+    @Environment(PlayerModel.self) private var playerModel
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
@@ -163,18 +163,7 @@ struct CinemaView: View {
                     onExit: {
                         Task {
                             await dismissImmersiveSpace()
-                            playerModel.isImmersiveMode = false
-                            
-                            // 确保 ContentView 能恢复到当前视频的详情页
-                            // 如果 restoringVideoItem 未设置（例如从 Window 播放器进入），则使用当前视频
-                            if playerModel.restoringVideoItem == nil {
-                                playerModel.restoringVideoItem = playerModel.currentVideoItem
-                            }
-                            
-                            // 退出后暂停，但保留播放器，便于再次进入沉浸模式时直接复用
-                            playerModel.player?.pause()
-                            // 退出沉浸模式后，重新打开主窗口 (详情页)
-                            openWindow(id: "MainWindow")
+                            playerModel.endImmersiveSession()
                         }
                     }
                 )
@@ -201,21 +190,23 @@ struct CinemaView: View {
         )
         .onAppear {
             print("🎬 CinemaView onAppear")
-            // 确保沉浸模式状态正确
-            playerModel.isImmersiveMode = true
+            print("🎬 CinemaView state -> immersive: \(playerModel.isImmersiveMode), player nil: \(playerModel.player == nil)")
             
             // 如果因为退出时清理了播放器，重新进入时确保重新加载
             if playerModel.player == nil, let info = playerModel.playInfo {
                 Task {
                     await playerModel.loadVideo(playInfo: info, cid: playerModel.cid, bvid: playerModel.bvid)
-                    playerModel.player?.play()
                 }
             }
             // 注意：不在这里关闭 PlayerWindow，由 PlayerWindowView 自己处理
         }
         .onDisappear {
-            // 任何途径退出沉浸空间都复位状态，避免下一次无法重新进入
-            playerModel.isImmersiveMode = false
+            print("🎬 CinemaView onDisappear - start")
+            // 只有当沉浸模式确实被关闭时（即 onDisappear 被调用），才重置状态
+            // 检查是否是因为 PlayerWindowView 的销毁带来的连带反应（虽然现在 openImmersiveSpace 移到了 ContentView，应该不会了）
+            
+            playerModel.endImmersiveSession()
+            print("🎬 CinemaView onDisappear -> restore window player, immersive: \(playerModel.isImmersiveMode)")
         }
     }
 }
@@ -275,15 +266,15 @@ struct CinemaControlsView: View {
                 // 按钮行
                 HStack(spacing: 40) {
                     // 退出按钮
-                    Button(action: onExit) {
-                        Image(systemName: "xmark")
-                            .font(.title2)
-                    }
-                    .buttonStyle(.plain) // 使用 plain 风格配合 glassBackground
-                    .padding(12)
-                    .glassBackgroundEffect(displayMode: .always)
-                    .clipShape(Circle())
-                    .help("退出沉浸模式")
+                Button(action: onExit) {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(.title2)
+                }
+                .buttonStyle(.plain) // 使用 plain 风格配合 glassBackground
+                .padding(12)
+                .glassBackgroundEffect(displayMode: .always)
+                .clipShape(Circle())
+                .help("切回窗口播放器")
                     
                     // 快退
                 Button {

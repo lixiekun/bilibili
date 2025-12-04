@@ -11,12 +11,16 @@ struct ContentView: View {
     @StateObject private var historyViewModel = HistoryViewModel() // 历史记录 VM
     @StateObject private var loginViewModel = QRLoginViewModel()
     // 添加对 PlayerModel 的观察，以响应恢复状态
-    @ObservedObject private var playerModel = PlayerModel.shared
+    @Environment(PlayerModel.self) private var playerModel
 
     @State private var isShowingLogin = false
     @State private var selectedTab: Tab = .recommend
     @State private var recommendPath = NavigationPath() // 推荐页面的导航路径，用于恢复状态
     private let autoLoad: Bool
+    
+    // 沉浸模式相关
+    @Environment(\.openImmersiveSpace) private var openImmersiveSpace
+    @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
 
     @MainActor
     init(viewModel: RecommendationViewModel, autoLoad: Bool = true) {
@@ -61,13 +65,16 @@ struct ContentView: View {
             }
             
             // 全局播放器层 (ZStack 顶层覆盖)
-            // 仅在非沉浸模式且需要显示播放器时显示
-            if playerModel.isWindowPlayerPresented && !playerModel.isImmersiveMode {
-                if let info = playerModel.playInfo, let item = playerModel.currentVideoItem {
+            if playerModel.isWindowPlayerPresented {
+                // 仅在 inline 状态下渲染窗口播放器；immersive 时不渲染以避免叠加
+                if playerModel.presentation == .inline, let info = playerModel.playInfo, let item = playerModel.currentVideoItem {
                     PlayerWindowView(playInfo: info, cid: item.cid, bvid: item.id)
                         .ignoresSafeArea()
                         .transition(.opacity)
                         .zIndex(100) // 确保在最顶层
+                } else {
+                    // 维持占位但不渲染实际内容
+                    Color.clear.allowsHitTesting(false)
                 }
             }
         }
@@ -123,8 +130,21 @@ struct ContentView: View {
             if !playerModel.isImmersiveMode {
                 playerModel.cleanup()
             }
+            // 这里不要立即设为 false，让 transition 动画有机会播放（如果需要的话）
+            // 但由于我们马上要切到沉浸模式，可以设为 false 来移除视图
             playerModel.isWindowPlayerPresented = false
+            
+            // 复位信号
             playerModel.shouldDismissPlayerWindow = false
+        }
+        // 监听进入沉浸模式通知 (移到 ContentView 层级处理，确保上下文稳定)
+        .onReceive(NotificationCenter.default.publisher(for: .enterCinemaMode)) { _ in
+            print("📢 ContentView: 收到 enterCinemaMode 通知! 准备进入...")
+            enterImmersiveSpace(id: "ImmersiveCinema")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .enterStudioMode)) { _ in
+            print("📢 ContentView: 收到 enterStudioMode 通知! 准备进入...")
+            enterImmersiveSpace(id: "ImmersiveStudio")
         }
     }
     
@@ -436,6 +456,26 @@ struct ContentView: View {
         case .hot: return "热门"
         case .ranking: return "排行榜"
         case .profile: return "我的"
+        }
+    }
+    
+    /// 在 ContentView 层级处理进入沉浸空间，确保上下文稳定
+    private func enterImmersiveSpace(id: String) {
+        Task { @MainActor in
+            print("🎬 ContentView: 开始打开沉浸空间 \(id)...")
+            
+            // 1. 打开沉浸空间
+            let result = await openImmersiveSpace(id: id)
+            print("🎬 ContentView: 沉浸空间 \(id) 打开结果: \(result)")
+            
+            if case .opened = result {
+                // 2. 成功后，更新状态
+                print("🎬 ContentView: 沉浸空间已打开，更新状态 -> presentation=immersive，隐藏窗口层")
+                playerModel.beginImmersiveSession()
+            } else {
+                print("🎬 ContentView: 沉浸空间打开失败")
+                playerModel.presentation = .inline
+            }
         }
     }
 }
@@ -761,7 +801,7 @@ struct VideoDetailView: View {
     let videoItem: VideoItem
     @State private var isResolving = false
     @State private var playError: String?
-    @ObservedObject private var playerModel = PlayerModel.shared
+    @Environment(PlayerModel.self) private var playerModel
     @StateObject private var relatedViewModel = RelatedViewModel()
     private let playerService = BilibiliPlayerService()
     
@@ -926,6 +966,7 @@ struct VideoDetailView: View {
             do {
                 let info = try await playerService.fetchPlayURL(bvid: videoItem.id, cid: videoItem.cid)
                 playerModel.playInfo = info
+                playerModel.presentation = .inline
                 
                 if native {
                      // native logic removed

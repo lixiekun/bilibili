@@ -1,31 +1,70 @@
 import Foundation
 import AVKit
-import Combine
+import Observation
+
+enum PresentationMode {
+    case inline
+    case immersive
+}
 
 /// 播放器状态管理模型
 /// 负责持有 AVPlayer 和 DanmakuEngine，以便在 Window 和 ImmersiveSpace 之间共享状态
+@Observable
 @MainActor
-class PlayerModel: ObservableObject {
+class PlayerModel {
     static let shared = PlayerModel()
     
-    @Published var player: AVPlayer?
-    @Published var danmakuEngine = DanmakuEngine()
-    @Published var playInfo: BilibiliPlayerService.PlayInfo?
-    @Published var cid: Int?
-    @Published var bvid: String?
-    @Published var resourceLoaderDelegate: BilibiliResourceLoaderDelegate?
-    @Published var isImmersiveMode: Bool = false // 同步沉浸模式状态
-    @Published var shouldShowNativePlayer: Bool = false // 全局控制 2D 播放器显示状态
-    @Published var restoringVideoItem: VideoItem? // 用于在退出沉浸模式时恢复详情页
-    @Published var shouldEnterCinema: Bool = false // 触发进入影院模式（用于 immersiveEnvironmentPicker）
-    @Published var shouldDismissPlayerWindow: Bool = false // 触发关闭 PlayerWindowView 的 fullScreenCover
-    @Published var isWindowPlayerPresented: Bool = false // 全局控制 PlayerWindowView 的 fullScreenCover 显示状态
-    @Published var currentVideoItem: VideoItem? // 当前播放的视频信息，用于 ZStack 播放器构建
+    var player: AVPlayer?
+    var danmakuEngine = DanmakuEngine()
+    var playInfo: BilibiliPlayerService.PlayInfo?
+    var cid: Int?
+    var bvid: String?
+    var resourceLoaderDelegate: BilibiliResourceLoaderDelegate?
+    var isImmersiveMode: Bool = false {
+        didSet {
+            print("PlayerModel: isImmersiveMode changed from \(oldValue) to \(isImmersiveMode)")
+        }
+    }
+    var shouldShowNativePlayer: Bool = false // 全局控制 2D 播放器显示状态
+    var restoringVideoItem: VideoItem? // 用于在退出沉浸模式时恢复详情页
+    var shouldEnterCinema: Bool = false // 触发进入影院模式（用于 immersiveEnvironmentPicker）
+    var shouldDismissPlayerWindow: Bool = false // 触发关闭 PlayerWindowView 的 fullScreenCover
+    var isWindowPlayerPresented: Bool = false // 全局控制 PlayerWindowView 的 fullScreenCover 显示状态
+    var currentVideoItem: VideoItem? // 当前播放的视频信息，用于 ZStack 播放器构建
+    var presentation: PresentationMode = .inline {
+        didSet {
+            print("PlayerModel: presentation changed from \(oldValue) to \(presentation)")
+            let immersive = presentation == .immersive
+            if isImmersiveMode != immersive {
+                isImmersiveMode = immersive
+            }
+        }
+    }
 
     // 用于控制播放器的时间监听器
     var timeObserver: Any?
     
     private init() {}
+    
+    /// 标记进入沉浸模式，统一隐藏窗口播放器但保留 AVPlayer。
+    func beginImmersiveSession() {
+        presentation = .immersive
+        shouldDismissPlayerWindow = true
+        isWindowPlayerPresented = false
+    }
+    
+    /// 退出沉浸模式后恢复窗口播放器的显示与播放。
+    func endImmersiveSession(resumePlayback: Bool = true) {
+        presentation = .inline
+        if restoringVideoItem == nil {
+            restoringVideoItem = currentVideoItem
+        }
+        if resumePlayback {
+            player?.play()
+        }
+        isWindowPlayerPresented = true
+        shouldDismissPlayerWindow = false
+    }
     
     /// 加载视频
     func loadVideo(playInfo: BilibiliPlayerService.PlayInfo, cid: Int?, bvid: String?) async {

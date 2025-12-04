@@ -61,22 +61,13 @@ class DanmakuService {
                     
                     let data = try await NetworkClient.shared
                         .request(url, parameters: signedParams, headers: headers)
-                        .validate { _, response, _ in
-                            // 304 Not Modified 被认为是成功的，数据虽然是空的，但我们不应报错
-                            if response.statusCode == 304 {
-                                return .success(Void())
-                            }
-                            return .success(Void())
-                        }
-                        .serializingData(emptyResponseCodes: [200, 204, 205, 304]) // 允许 304 空响应
+                        .validate()
+                        .serializingData(emptyResponseCodes: [200, 204, 205]) // 允许空响应
                         .value
                     
-                    // 304 或空数据时，由于我们没有缓存机制，这会导致无弹幕，所以这里需要抛出错误回退 XML
-                    // 注意：如果有本地缓存，应该读取缓存
                     if data.isEmpty {
-                        // 如果是 304，说明服务器认为我们有缓存，但实际上我们没有持久化缓存
-                        // 这种情况应该视为失败，触发 XML 回退
-                        throw DanmakuError.invalidData
+                        print("Protobuf fetch returned empty data for segment \(i)")
+                        return []
                     }
                     
                     let reply = try DmSegMobileReply(serializedData: data)

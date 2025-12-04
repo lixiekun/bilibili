@@ -5,10 +5,9 @@ import UIKit
 
 /// 官方 Demo 风格的演播室沉浸场景，用来与影院模式做对比。
 struct StudioView: View {
-    @StateObject private var playerModel = PlayerModel.shared
+    @Environment(PlayerModel.self) private var playerModel
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @Environment(\.dismissWindow) private var dismissWindow
-    @Environment(\.openWindow) private var openWindow
     
     @State private var scale: CGFloat = 1.05
     @State private var distance: CGFloat = -5.5
@@ -91,7 +90,7 @@ struct StudioView: View {
         }
         .onAppear {
             print("🎬 StudioView onAppear")
-            playerModel.isImmersiveMode = true
+            playerModel.presentation = .immersive
         }
     }
     
@@ -243,15 +242,7 @@ struct StudioView: View {
     private func exitImmersive() {
         Task {
             await dismissImmersiveSpace()
-            playerModel.isImmersiveMode = false
-            
-            if playerModel.restoringVideoItem == nil {
-                playerModel.restoringVideoItem = playerModel.currentVideoItem
-            }
-            
-            playerModel.cleanup()
-            openWindow(id: "MainWindow")
-            dismissWindow(id: "PlayerWindow")
+            playerModel.endImmersiveSession()
         }
     }
     
